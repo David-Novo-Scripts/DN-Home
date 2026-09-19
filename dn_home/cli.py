@@ -7,6 +7,7 @@ import asyncio
 import logging
 from pathlib import Path
 import sys
+import time
 
 from dn_home.core.config import ConfigError, load_config
 from dn_home.core.logging import configure_logging
@@ -72,6 +73,7 @@ async def _doctor(config) -> int:
 
 
 async def _speak(args: argparse.Namespace, config) -> int:
+    text_request_started_at = time.monotonic()
     text = " ".join(args.text).strip()
     volume = config.speaker.volume if args.volume is None else args.volume
     if not 0 <= volume <= 100:
@@ -86,7 +88,9 @@ async def _speak(args: argparse.Namespace, config) -> int:
         rate=config.voice.rate,
         pitch=config.voice.pitch,
     )
+    tts_started_at = time.monotonic()
     asset = await engine.generate(text, args.voice)
+    tts_generation_ms = round((time.monotonic() - tts_started_at) * 1000)
     try:
         speaker = CastSpeaker(config.speaker, config.network, config.http)
         result = await asyncio.to_thread(
@@ -94,6 +98,20 @@ async def _speak(args: argparse.Namespace, config) -> int:
             asset,
             volume=volume,
             restore_previous_volume=restore,
+        )
+        metrics = result.metrics
+        LOGGER.info(
+            "event=speech.latency tts_generation_ms=%d http_server_start_ms=%d "
+            "cast_connection_ms=%d receiver_launch_ms=%d "
+            "play_media_to_http_get_ms=%d http_get_to_playback_started_ms=%d "
+            "total_text_to_audio_started_ms=%d",
+            tts_generation_ms,
+            metrics.http_server_start_ms,
+            metrics.cast_connection_ms,
+            metrics.receiver_launch_ms,
+            metrics.play_media_to_http_get_ms,
+            metrics.http_get_to_playback_started_ms,
+            round((metrics.audio_started_at - text_request_started_at) * 1000),
         )
     finally:
         asset.cleanup()

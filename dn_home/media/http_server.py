@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import secrets
 import threading
+import time
 from typing import Any
 
 from dn_home.voice.models import AudioAsset
@@ -26,7 +27,8 @@ class MediaServerError(RuntimeError):
 
 class _MediaHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = False
+    allow_reuse_address = True
+    allow_reuse_port = False
 
 
 class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
@@ -43,6 +45,7 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
         self.route = f"/{self.token}{asset.path.suffix}"
         self.request_started = threading.Event()
         self.request_completed = threading.Event()
+        self.request_started_at: float | None = None
         self._server: _MediaHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -79,7 +82,9 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
                 if self.path != owner.route:
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
-                owner.request_started.set()
+                if send_body:
+                    owner.request_started_at = time.monotonic()
+                    owner.request_started.set()
                 try:
                     file_size = owner.asset.path.stat().st_size
                     LOGGER.info(
@@ -137,7 +142,8 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
                 except (BrokenPipeError, ConnectionResetError):
                     LOGGER.debug("event=http.client_disconnected")
                 finally:
-                    owner.request_completed.set()
+                    if send_body:
+                        owner.request_completed.set()
 
         return Handler
 
@@ -145,19 +151,25 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
         if self._server:
             return self
         try:
-            self._server = _MediaHTTPServer(
+            server = _MediaHTTPServer(
                 (self.bind_host, self.requested_port), self._handler_class()
             )
         except OSError as error:
             raise MediaServerError(
                 f"Unable to bind temporary HTTP server to {self.bind_host}: {error}"
             ) from error
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
+        thread = threading.Thread(
+            target=server.serve_forever,
             name="dn-home-media",
             daemon=True,
         )
-        self._thread.start()
+        try:
+            thread.start()
+        except Exception:
+            server.server_close()
+            raise
+        self._server = server
+        self._thread = thread
         LOGGER.info(
             "event=http.started bind=%s port=%d route_token=redacted",
             self.bind_host,
@@ -166,15 +178,22 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
         return self
 
     def stop(self) -> None:
-        if not self._server:
+        server = self._server
+        thread = self._thread
+        if server is None:
             return
-        self._server.shutdown()
-        self._server.server_close()
-        if self._thread:
-            self._thread.join(timeout=2)
-        LOGGER.info("event=http.stopped bind=%s port=%d", self.bind_host, self.port)
-        self._thread = None
-        self._server = None
+        port = int(server.server_address[1])
+        try:
+            server.shutdown()
+        finally:
+            try:
+                server.server_close()
+            finally:
+                if thread is not None and thread is not threading.current_thread():
+                    thread.join()
+                self._thread = None
+                self._server = None
+        LOGGER.info("event=http.stopped bind=%s port=%d", self.bind_host, port)
 
     def __enter__(self) -> "TemporaryAudioServer":
         return self.start()

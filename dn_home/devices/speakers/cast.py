@@ -13,12 +13,21 @@ from pychromecast.models import CastInfo, HostServiceInfo
 
 from dn_home.core.config import HttpConfig, NetworkConfig, SpeakerConfig
 from dn_home.core.network import NetworkSelection, select_lan_address
-from dn_home.devices.speakers.base import PlaybackResult, Speaker, SpeakerError
+from dn_home.devices.speakers.base import (
+    PlaybackMetrics,
+    PlaybackResult,
+    Speaker,
+    SpeakerError,
+)
 from dn_home.media.http_server import TemporaryAudioServer
 from dn_home.voice.models import AudioAsset
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _milliseconds(started: float, ended: float | None = None) -> int:
+    return round(((time.monotonic() if ended is None else ended) - started) * 1000)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,19 +128,19 @@ class CastSpeaker(Speaker):
             port=self.config.port,
         )
 
-    def _wait_for_completion(self, cast: Chromecast, started: float) -> None:
+    def _wait_for_completion(self, cast: Chromecast, requested_at: float) -> float:
         controller = cast.media_controller
-        deadline = started + self.config.playback_timeout
-        has_played = False
+        deadline = requested_at + self.config.playback_timeout
+        playback_started_at: float | None = None
         while time.monotonic() < deadline:
             state = controller.status.player_state
             if state == "PLAYING":
-                if not has_played:
+                if playback_started_at is None:
+                    playback_started_at = time.monotonic()
                     LOGGER.info("event=cast.playback_started result=success")
-                has_played = True
-            elif has_played and state in {"IDLE", "UNKNOWN"}:
+            elif playback_started_at is not None and state in {"IDLE", "UNKNOWN"}:
                 LOGGER.info("event=cast.playback_finished result=success")
-                return
+                return playback_started_at
             time.sleep(0.1)
         try:
             controller.stop()
@@ -152,31 +161,38 @@ class CastSpeaker(Speaker):
         cast: Chromecast | None = None
         previous_volume: float | None = None
         playback_started = False
-        started = time.monotonic()
+        operation_started = time.monotonic()
 
         try:
-            with TemporaryAudioServer(
+            media_server = TemporaryAudioServer(
                 asset,
                 selection.local_ip,
                 port=self.http.port,
-            ) as media_server:
+            )
+            http_start = time.monotonic()
+            with media_server:
+                http_server_start_ms = _milliseconds(http_start)
                 LOGGER.info(
                     "event=cast.media_ready interface=%s local_ip=%s url=%s",
                     selection.interface,
                     selection.local_ip,
                     media_server.sanitized_url,
                 )
+                cast_connect_started = time.monotonic()
                 cast, device = self._connect()
+                cast_connection_ms = _milliseconds(cast_connect_started)
                 if cast.status is not None:
                     previous_volume = cast.status.volume_level
                 cast.set_volume(volume / 100.0, timeout=self.config.connect_timeout)
 
                 controller = cast.media_controller
                 LOGGER.info(
-                    "event=cast.playback_requested device=%s url=%s",
+                    "event=cast.playback_requested device=%s content_type=%s url=%s",
                     device.friendly_name,
+                    asset.content_type,
                     media_server.sanitized_url,
                 )
+                play_media_started_at = time.monotonic()
                 controller.play_media(
                     media_server.url,
                     asset.content_type,
@@ -188,22 +204,49 @@ class CastSpeaker(Speaker):
                     controller.block_until_active(timeout=self.config.connect_timeout)
                 except Exception as error:
                     raise SpeakerError(f"Cast receiver did not become active: {error}") from error
+                receiver_launch_ms = _milliseconds(play_media_started_at)
 
                 if not media_server.request_started.wait(self.http.request_timeout):
                     raise SpeakerError(
                         "The Nest did not request the temporary audio URL within "
                         f"{self.http.request_timeout:g}s"
                     )
-                self._wait_for_completion(cast, started)
+                http_get_at = media_server.request_started_at
+                if http_get_at is None:
+                    raise SpeakerError("The HTTP GET timestamp was not recorded")
+                audio_started_at = self._wait_for_completion(cast, play_media_started_at)
+                metrics = PlaybackMetrics(
+                    http_server_start_ms=http_server_start_ms,
+                    cast_connection_ms=cast_connection_ms,
+                    receiver_launch_ms=receiver_launch_ms,
+                    play_media_to_http_get_ms=_milliseconds(
+                        play_media_started_at, http_get_at
+                    ),
+                    http_get_to_playback_started_ms=_milliseconds(
+                        http_get_at, audio_started_at
+                    ),
+                    audio_started_at=audio_started_at,
+                )
                 LOGGER.info(
-                    "event=cast.playback device=%s latency_ms=%d result=success",
+                    "event=cast.latency http_server_start_ms=%d cast_connection_ms=%d "
+                    "receiver_launch_ms=%d play_media_to_http_get_ms=%d "
+                    "http_get_to_playback_started_ms=%d",
+                    metrics.http_server_start_ms,
+                    metrics.cast_connection_ms,
+                    metrics.receiver_launch_ms,
+                    metrics.play_media_to_http_get_ms,
+                    metrics.http_get_to_playback_started_ms,
+                )
+                LOGGER.info(
+                    "event=cast.playback device=%s operation_duration_ms=%d result=success",
                     device.friendly_name,
-                    round((time.monotonic() - started) * 1000),
+                    _milliseconds(operation_started),
                 )
                 return PlaybackResult(
                     device_name=device.friendly_name,
                     completed=True,
                     media_fetched=media_server.request_completed.is_set(),
+                    metrics=metrics,
                 )
         except SpeakerError:
             raise

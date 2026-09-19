@@ -17,6 +17,17 @@ def _assigned_private_ip() -> str:
     return address
 
 
+def _fetch_with_server_initiated_close(bind_ip: str, port: int, route: str) -> bytes:
+    with socket.create_connection((bind_ip, port), timeout=2) as client:
+        client.sendall(
+            f"GET {route} HTTP/1.0\r\nHost: {bind_ip}\r\n\r\n".encode("ascii")
+        )
+        response = bytearray()
+        while chunk := client.recv(4096):
+            response.extend(chunk)
+    return bytes(response)
+
+
 def test_serves_only_random_exact_path_and_ranges(tmp_path: Path) -> None:
     path = tmp_path / "speech.tts.mp3"
     path.write_bytes(b"0123456789")
@@ -68,3 +79,43 @@ def test_server_stops_and_releases_port(tmp_path: Path) -> None:
         sock.settimeout(1)
         assert sock.connect_ex((bind_ip, port)) != 0
 
+
+def test_server_reuses_same_port_immediately_after_completed_request(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "speech.tts.mp3"
+    path.write_bytes(b"ID3-reuse-test")
+    asset = AudioAsset(path, "audio/mpeg")
+    bind_ip = _assigned_private_ip()
+
+    first = TemporaryAudioServer(asset, bind_ip).start()
+    port = first.port
+    first_response = _fetch_with_server_initiated_close(bind_ip, port, first.route)
+    first_thread = first._thread
+    first.stop()
+
+    assert b"200 OK" in first_response
+    assert first_thread is not None and not first_thread.is_alive()
+
+    second = TemporaryAudioServer(asset, bind_ip, port=port).start()
+    try:
+        second_response = _fetch_with_server_initiated_close(
+            bind_ip, port, second.route
+        )
+        assert b"200 OK" in second_response
+    finally:
+        second.stop()
+
+
+def test_server_does_not_allow_concurrent_bind_on_same_port(tmp_path: Path) -> None:
+    path = tmp_path / "speech.tts.mp3"
+    path.write_bytes(b"ID3-single-server-test")
+    asset = AudioAsset(path, "audio/mpeg")
+    bind_ip = _assigned_private_ip()
+    first = TemporaryAudioServer(asset, bind_ip).start()
+
+    try:
+        with pytest.raises(MediaServerError, match="Unable to bind"):
+            TemporaryAudioServer(asset, bind_ip, port=first.port).start()
+    finally:
+        first.stop()

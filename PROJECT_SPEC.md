@@ -486,6 +486,18 @@ O servidor HTTP usado para entregar áudio ao Nest:
 - não deve permitir directory listing;
 - deve expirar após reprodução ou timeout;
 - deve fechar e limpar ficheiros/recursos mesmo em caso de erro.
+- deve permitir a reutilização normal da porta configurada com SO_REUSEADDR,
+  sem usar SO_REUSEPORT;
+- deve executar shutdown e server_close explícitos e aguardar o fim da thread
+  de serviço antes de devolver controlo;
+- não deve permitir dois servidores DN_Home simultâneos na mesma porta.
+
+Numa evolução futura para um processo DN_Home residente, poderá existir um
+servidor HTTP persistente na porta configurada. Mesmo nesse modelo, cada media
+asset deve continuar acessível apenas através de URL/token temporário, expirar
+depois de usado ou por timeout e ser eliminado com segurança. Frases TTS
+estáticas e não sensíveis, como greetings, poderão ser cacheadas; conteúdo
+dinâmico ou sensível não deve ser guardado nessa cache.
 
 Se for necessária uma regra de firewall para esta entrega, deve seguir o
 princípio de menor privilégio: limitar interface, IP de origem do dispositivo
@@ -1285,6 +1297,11 @@ Futuramente quero que DN_Home possa funcionar como serviço.
 
 Preparar arquitetura compatível com systemd.
 
+Para reduzir a latência de voz, avaliar nessa fase manter o processo residente,
+reutilizar ligações Google Cast saudáveis, reconectar automaticamente quando
+necessário e manter o servidor HTTP local disponível na porta configurada.
+Não implementar este daemon persistente durante as correções da Fase 1.
+
 Mas:
 
 NÃO ativar nem instalar automaticamente um serviço nesta primeira etapa.
@@ -1333,6 +1350,19 @@ Quero medir:
 - CPU
 - RAM
 - latency
+
+Para o caminho de voz, medir separadamente:
+
+- tts_generation_ms;
+- http_server_start_ms;
+- cast_connection_ms;
+- receiver_launch_ms;
+- play_media_to_http_get_ms;
+- http_get_to_playback_started_ms;
+- total_text_to_audio_started_ms.
+
+A duração total da reprodução/operação não deve ser apresentada como latência
+até ao início da fala.
 
 antes de decidir soluções permanentes.
 
