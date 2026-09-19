@@ -1,0 +1,48 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+secrets*.yaml
+secrets*.yml
+
+# Local configuration
+config/config.yaml
+
+# Python environments and package output
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# Python caches and test artefacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime logs
+logs/
+*.log
+
+# Temporary and generated files
+tmp/
+temp/
+.cache/
+data/generated_audio/
+*.tts.mp3
+*.tts.wav
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
