@@ -35,6 +35,7 @@ def test_load_config_resolves_values(tmp_path: Path) -> None:
     assert config.speaker.host == "192.168.20.40"
     assert config.speaker.volume == 35
     assert config.network.lan_ip is None
+    assert config.http.port == 8765
     assert config.logging.file == tmp_path / "logs" / "test.log"
 
 
@@ -56,3 +57,10 @@ def test_requires_cast_identity(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="speaker.name or speaker.host"):
         load_config(path)
 
+
+def test_rejects_ephemeral_media_port(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(VALID_CONFIG.replace("http: {}", "http:\n  port: 0"), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="http.port"):
+        load_config(path)

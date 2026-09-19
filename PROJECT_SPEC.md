@@ -477,11 +477,22 @@ O servidor HTTP usado para entregar áudio ao Nest:
 - nunca deve fazer bind a 0.0.0.0;
 - deve fazer bind apenas ao endereço local selecionado para a rede do Nest;
 - não deve anunciar Tailscale, WireGuard, VPN ou WAN;
+- deve usar uma porta TCP dedicada e configurável, inicialmente 8765;
+- não deve usar uma porta efémera aleatória para a entrega normal de áudio;
+- a porta não deve estar hardcoded no código e deve poder mudar apenas por
+  configuração;
 - deve servir apenas o ficheiro temporário daquela reprodução;
 - deve usar URL/token aleatório não previsível;
 - não deve permitir directory listing;
 - deve expirar após reprodução ou timeout;
 - deve fechar e limpar ficheiros/recursos mesmo em caso de erro.
+
+Se for necessária uma regra de firewall para esta entrega, deve seguir o
+princípio de menor privilégio: limitar interface, IP de origem do dispositivo
+Cast, IP de destino local, protocolo TCP e porta DN_Home configurada. Não abrir
+intervalos grandes de portas nem permitir genericamente todo o tráfego vindo
+do dispositivo. Qualquer alteração de firewall continua a exigir aprovação
+explícita antes de ser aplicada.
 
 ========================
 11.2. GOOGLE CAST / REDE

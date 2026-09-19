@@ -23,7 +23,8 @@ cp config/config.example.yaml config/config.yaml
 
 Set `speaker.name` and `speaker.host` in the local `config/config.yaml`. This
 file is ignored by Git. IP addresses and network interfaces are never embedded
-in source code.
+in source code. `http.port` selects the dedicated TCP port used only while the
+Nest fetches generated media; its initial value is `8765`.
 
 ## Commands
 
@@ -58,9 +59,10 @@ Nest unless `network.lan_interface` or `network.lan_ip` is explicitly set. It
 refuses wildcard, loopback, public, and common VPN interface addresses for the
 temporary media server.
 
-The HTTP server binds only to the selected LAN address. It serves one exact,
-randomly named file, exposes no directory listing, and shuts down after
-playback or timeout. Generated audio is deleted in all success and error paths.
+The HTTP server binds only to the selected LAN address and configured dedicated
+port. It serves one exact, randomly named file, exposes no directory listing,
+and shuts down after playback or timeout. Generated audio is deleted in all
+success and error paths.
 
 No paid API, password, token, network reconfiguration, or systemd service is
 used in Phase 1. Edge TTS requires Internet access; a local Piper adapter is a
@@ -71,4 +73,3 @@ planned fallback but is not installed yet.
 ```bash
 python -m pytest
 ```
-

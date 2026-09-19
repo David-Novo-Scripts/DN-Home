@@ -115,7 +115,7 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
 
     speaker_volume = int(_number(speaker.get("volume", 35), "speaker.volume", 0, 100))
     speaker_port = int(_number(speaker.get("port", 8009), "speaker.port", 1, 65535))
-    http_port = int(_number(http.get("port", 0), "http.port", 0, 65535))
+    http_port = int(_number(http.get("port", 8765), "http.port", 1, 65535))
 
     name = str(speaker.get("name", "")).strip()
     host = _optional_text(speaker.get("host"))
@@ -175,4 +175,3 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
         ),
         source=source,
     )
-
