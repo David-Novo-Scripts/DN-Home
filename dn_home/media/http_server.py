@@ -82,6 +82,12 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
                 owner.request_started.set()
                 try:
                     file_size = owner.asset.path.stat().st_size
+                    LOGGER.info(
+                        "event=http.media_requested client=%s method=%s bytes=%d token=redacted",
+                        self.client_address[0],
+                        self.command,
+                        file_size,
+                    )
                     start, end, status = 0, file_size - 1, HTTPStatus.OK
                     range_header = self.headers.get("Range")
                     if range_header:
@@ -123,6 +129,11 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
                                     break
                                 self.wfile.write(chunk)
                                 remaining -= len(chunk)
+                        LOGGER.info(
+                            "event=http.media_delivered client=%s bytes=%d result=success",
+                            self.client_address[0],
+                            length,
+                        )
                 except (BrokenPipeError, ConnectionResetError):
                     LOGGER.debug("event=http.client_disconnected")
                 finally:
@@ -147,7 +158,7 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
             daemon=True,
         )
         self._thread.start()
-        LOGGER.debug(
+        LOGGER.info(
             "event=http.started bind=%s port=%d route_token=redacted",
             self.bind_host,
             self.port,
@@ -161,7 +172,7 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
         self._server.server_close()
         if self._thread:
             self._thread.join(timeout=2)
-        LOGGER.debug("event=http.stopped bind=%s port=%d", self.bind_host, self.port)
+        LOGGER.info("event=http.stopped bind=%s port=%d", self.bind_host, self.port)
         self._thread = None
         self._server = None
 
@@ -170,4 +181,3 @@ class TemporaryAudioServer(AbstractContextManager["TemporaryAudioServer"]):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         self.stop()
-

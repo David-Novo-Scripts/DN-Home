@@ -97,6 +97,7 @@ async def _speak(args: argparse.Namespace, config) -> int:
         )
     finally:
         asset.cleanup()
+        LOGGER.info("event=tts.cleaned result=success")
     print(f"Spoken successfully on {result.device_name}")
     return 0
 
@@ -126,4 +127,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

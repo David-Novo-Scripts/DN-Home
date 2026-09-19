@@ -105,6 +105,12 @@ class CastSpeaker(Speaker):
             retry_wait=1,
         )
         cast.wait(timeout=self.config.connect_timeout)
+        LOGGER.info(
+            "event=cast.connected device=%s host=%s port=%d result=success",
+            status.friendly_name,
+            host,
+            self.config.port,
+        )
         return cast, CastDeviceInfo(
             friendly_name=status.friendly_name,
             model_name=status.model_name,
@@ -120,8 +126,11 @@ class CastSpeaker(Speaker):
         while time.monotonic() < deadline:
             state = controller.status.player_state
             if state == "PLAYING":
+                if not has_played:
+                    LOGGER.info("event=cast.playback_started result=success")
                 has_played = True
             elif has_played and state in {"IDLE", "UNKNOWN"}:
+                LOGGER.info("event=cast.playback_finished result=success")
                 return
             time.sleep(0.1)
         try:
@@ -163,6 +172,11 @@ class CastSpeaker(Speaker):
                 cast.set_volume(volume / 100.0, timeout=self.config.connect_timeout)
 
                 controller = cast.media_controller
+                LOGGER.info(
+                    "event=cast.playback_requested device=%s url=%s",
+                    device.friendly_name,
+                    media_server.sanitized_url,
+                )
                 controller.play_media(
                     media_server.url,
                     asset.content_type,
