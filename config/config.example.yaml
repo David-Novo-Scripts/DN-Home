@@ -1,0 +1,36 @@
+house:
+  resident_name: David
+
+voice:
+  engine: edge
+  language: pt-PT
+  default_voice: pt-PT-DuarteNeural
+  rate: "+0%"
+  pitch: "+0Hz"
+
+speaker:
+  provider: cast
+  name: ""
+  host: ""
+  port: 8009
+  volume: 35
+  restore_previous_volume: true
+  connect_timeout: 10
+  playback_timeout: 60
+
+network:
+  # Leave empty to select the source address/interface from the route to speaker.host.
+  lan_interface: ""
+  lan_ip: ""
+
+http:
+  # 0 asks the operating system for a temporary free port.
+  port: 0
+  request_timeout: 20
+
+logging:
+  level: INFO
+  file: logs/dn_home.log
+  max_bytes: 2097152
+  backup_count: 3
+

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dn-home"
+version = "0.1.0"
+description = "Local-first home assistant for Raspberry Pi"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "edge-tts>=7.2,<8",
+    "PyChromecast>=14,<15",
+    "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.24,<2",
+]
+
+[tool.setuptools.packages.find]
+include = ["dn_home*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
