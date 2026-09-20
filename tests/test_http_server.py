@@ -52,7 +52,7 @@ def test_serves_only_random_exact_path_and_ranges(tmp_path: Path) -> None:
         connection.close()
 
         assert server.request_started.is_set()
-        assert server.request_completed.is_set()
+        assert server.request_completed.wait(1)
 
 
 def test_refuses_wildcard_and_loopback(tmp_path: Path) -> None:

@@ -64,9 +64,11 @@ class EdgeTTSEngine(TTSEngine):
                 raise
             raise TTSError(f"Edge TTS generation failed: {error}") from error
         LOGGER.info(
-            "event=tts.generated engine=edge voice=%s bytes=%d "
+            "event=tts.generated engine=edge voice=%s rate=%s pitch=%s bytes=%d "
             "tts_generation_ms=%d result=success",
             selected_voice,
+            self.rate,
+            self.pitch,
             output.stat().st_size,
             round((time.monotonic() - started) * 1000),
         )

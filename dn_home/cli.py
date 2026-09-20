@@ -9,7 +9,12 @@ from pathlib import Path
 import sys
 import time
 
-from dn_home.core.config import ConfigError, load_config
+from dn_home.core.config import (
+    ConfigError,
+    load_config,
+    validate_voice_pitch,
+    validate_voice_rate,
+)
 from dn_home.core.logging import configure_logging
 from dn_home.devices.speakers.cast import CastSpeaker
 from dn_home.doctor import run_doctor
@@ -18,6 +23,20 @@ from dn_home.voice.tts.edge import EdgeTTSEngine
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _rate_argument(value: str) -> str:
+    try:
+        return validate_voice_rate(value, "--rate")
+    except ConfigError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def _pitch_argument(value: str) -> str:
+    try:
+        return validate_voice_pitch(value, "--pitch")
+    except ConfigError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -36,6 +55,16 @@ def _parser() -> argparse.ArgumentParser:
 
     speak = commands.add_parser("speak", help="speak text through the configured Nest")
     speak.add_argument("--voice", help="TTS voice name")
+    speak.add_argument(
+        "--rate",
+        type=_rate_argument,
+        help="Edge TTS speaking rate, for example +8%%; defaults to voice.rate",
+    )
+    speak.add_argument(
+        "--pitch",
+        type=_pitch_argument,
+        help="Edge TTS pitch, for example -5Hz; defaults to voice.pitch",
+    )
     speak.add_argument("--volume", type=int, help="Nest volume from 0 to 100")
     speak.add_argument(
         "--restore-volume",
@@ -85,8 +114,8 @@ async def _speak(args: argparse.Namespace, config) -> int:
     )
     engine = EdgeTTSEngine(
         config.voice.default_voice,
-        rate=config.voice.rate,
-        pitch=config.voice.pitch,
+        rate=config.voice.rate if args.rate is None else args.rate,
+        pitch=config.voice.pitch if args.pitch is None else args.pitch,
     )
     tts_started_at = time.monotonic()
     asset = await engine.generate(text, args.voice)

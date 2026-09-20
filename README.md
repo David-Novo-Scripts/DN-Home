@@ -46,7 +46,13 @@ Speak through the configured Nest:
 python -m dn_home speak "Bem-vindo a casa, David."
 python -m dn_home speak --voice pt-PT-DuarteNeural --volume 35 \
   "Olá David. Esta é a voz da tua casa."
+python -m dn_home speak --voice pt-PT-DuarteNeural --rate "+8%" \
+  --pitch=-5Hz --volume 55 "Bem-vindo a casa David."
 ```
+
+`--rate` uses a signed percentage and `--pitch` uses signed Hz. If omitted,
+they default to `voice.rate` and `voice.pitch` in the YAML configuration. Nest
+volume is separate from TTS prosody.
 
 Use `--no-restore-volume` if the requested volume should remain configured on
 the Nest after playback. By default the value comes from

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -11,6 +12,10 @@ import yaml
 
 class ConfigError(ValueError):
     """Raised when application configuration is missing or invalid."""
+
+
+RATE_PATTERN = re.compile(r"^[+-]\d+%$")
+PITCH_PATTERN = re.compile(r"^[+-]\d+Hz$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +95,20 @@ def _number(value: Any, name: str, minimum: float, maximum: float) -> float:
     return result
 
 
+def validate_voice_rate(value: Any, name: str = "voice.rate") -> str:
+    text = str(value).strip()
+    if RATE_PATTERN.fullmatch(text) is None:
+        raise ConfigError(f"'{name}' must use a signed percentage such as +8%")
+    return text
+
+
+def validate_voice_pitch(value: Any, name: str = "voice.pitch") -> str:
+    text = str(value).strip()
+    if PITCH_PATTERN.fullmatch(text) is None:
+        raise ConfigError(f"'{name}' must use signed Hz such as -5Hz")
+    return text
+
+
 def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
     """Load and validate the Phase 1 YAML configuration."""
 
@@ -136,8 +155,8 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
             engine=engine,
             language=str(voice.get("language", "pt-PT")).strip() or "pt-PT",
             default_voice=str(voice.get("default_voice", "pt-PT-DuarteNeural")).strip(),
-            rate=str(voice.get("rate", "+0%")).strip(),
-            pitch=str(voice.get("pitch", "+0Hz")).strip(),
+            rate=validate_voice_rate(voice.get("rate", "+0%")),
+            pitch=validate_voice_pitch(voice.get("pitch", "+0Hz")),
         ),
         speaker=SpeakerConfig(
             provider=str(speaker.get("provider", "cast")).strip().lower(),

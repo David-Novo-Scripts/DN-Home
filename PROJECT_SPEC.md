@@ -567,6 +567,19 @@ python -m dn_home speak --voice <voice> "Olá David. Esta é a voz da tua casa."
 
 Quero poder mudar facilmente a voz global da casa.
 
+O adaptador Edge TTS deve aceitar prosódia opcional através de configuração e
+overrides CLI:
+
+- rate no formato de percentagem com sinal obrigatório, por exemplo +8%;
+- pitch no formato Hz com sinal obrigatório, por exemplo -5Hz;
+- os defaults devem permanecer neutros: rate +0% e pitch +0Hz.
+
+Os parâmetros CLI `--rate` e `--pitch` devem sobrepor apenas a execução atual e
+manter compatibilidade com comandos que não os indiquem. O Edge TTS também
+suporta volume de síntese em percentagem, mas nesta fase esse parâmetro fica no
+default +0% e não é exposto pela CLI. O volume TTS é distinto do volume Cast do
+Nest configurado por `--volume`.
+
 A mesma voz deverá futuramente ser usada para:
 - boas-vindas;
 - alertas;
