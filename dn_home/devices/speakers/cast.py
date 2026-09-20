@@ -154,12 +154,13 @@ class CastSpeaker(Speaker):
         self,
         asset: AudioAsset,
         *,
-        volume: int,
+        volume: int | None,
         restore_previous_volume: bool,
     ) -> PlaybackResult:
         selection = self.select_network()
         cast: Chromecast | None = None
         previous_volume: float | None = None
+        volume_changed = False
         playback_started = False
         operation_started = time.monotonic()
 
@@ -181,9 +182,11 @@ class CastSpeaker(Speaker):
                 cast_connect_started = time.monotonic()
                 cast, device = self._connect()
                 cast_connection_ms = _milliseconds(cast_connect_started)
-                if cast.status is not None:
-                    previous_volume = cast.status.volume_level
-                cast.set_volume(volume / 100.0, timeout=self.config.connect_timeout)
+                if volume is not None:
+                    if cast.status is not None:
+                        previous_volume = cast.status.volume_level
+                    cast.set_volume(volume / 100.0, timeout=self.config.connect_timeout)
+                    volume_changed = True
 
                 controller = cast.media_controller
                 LOGGER.info(
@@ -254,7 +257,11 @@ class CastSpeaker(Speaker):
             raise SpeakerError(f"Google Cast playback failed: {error}") from error
         finally:
             if cast is not None:
-                if restore_previous_volume and previous_volume is not None:
+                if (
+                    volume_changed
+                    and restore_previous_volume
+                    and previous_volume is not None
+                ):
                     try:
                         cast.set_volume(
                             previous_volume,

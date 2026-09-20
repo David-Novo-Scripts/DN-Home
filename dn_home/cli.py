@@ -39,6 +39,18 @@ def _pitch_argument(value: str) -> str:
         raise argparse.ArgumentTypeError(str(error)) from error
 
 
+def _requested_cast_volume(cli_volume: int | None, speaker_config) -> int | None:
+    if cli_volume is not None:
+        volume = cli_volume
+    elif speaker_config.manage_volume:
+        volume = speaker_config.volume
+    else:
+        return None
+    if not 0 <= volume <= 100:
+        raise ConfigError("--volume must be between 0 and 100")
+    return volume
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m dn_home")
     parser.add_argument(
@@ -83,6 +95,7 @@ async def _voices(args: argparse.Namespace, config) -> int:
         config.voice.default_voice,
         rate=config.voice.rate,
         pitch=config.voice.pitch,
+        tts_volume=config.voice.tts_volume,
     )
     language = None if args.all else (args.language or config.voice.language)
     voices = await engine.list_voices(language)
@@ -104,9 +117,7 @@ async def _doctor(config) -> int:
 async def _speak(args: argparse.Namespace, config) -> int:
     text_request_started_at = time.monotonic()
     text = " ".join(args.text).strip()
-    volume = config.speaker.volume if args.volume is None else args.volume
-    if not 0 <= volume <= 100:
-        raise ConfigError("--volume must be between 0 and 100")
+    volume = _requested_cast_volume(args.volume, config.speaker)
     restore = (
         config.speaker.restore_previous_volume
         if args.restore_volume is None
@@ -116,6 +127,7 @@ async def _speak(args: argparse.Namespace, config) -> int:
         config.voice.default_voice,
         rate=config.voice.rate if args.rate is None else args.rate,
         pitch=config.voice.pitch if args.pitch is None else args.pitch,
+        tts_volume=config.voice.tts_volume,
     )
     tts_started_at = time.monotonic()
     asset = await engine.generate(text, args.voice)

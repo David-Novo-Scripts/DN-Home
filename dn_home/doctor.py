@@ -30,6 +30,7 @@ async def run_doctor(config: AppConfig) -> list[CheckResult]:
         config.voice.default_voice,
         rate=config.voice.rate,
         pitch=config.voice.pitch,
+        tts_volume=config.voice.tts_volume,
     )
     try:
         voices = await tts.list_voices(config.voice.language)
@@ -82,4 +83,3 @@ async def run_doctor(config: AppConfig) -> list[CheckResult]:
     finally:
         asset.cleanup()
     return results
-

@@ -8,12 +8,17 @@ voice:
   # Edge TTS prosody uses a mandatory sign: percentage for rate, Hz for pitch.
   rate: "+0%"
   pitch: "+0Hz"
+  # Audio gain applied by Edge TTS; separate from the Nest's physical volume.
+  tts_volume: "+0%"
 
 speaker:
   provider: cast
   name: ""
   host: ""
   port: 8009
+  # false preserves the Nest's current physical volume unless --volume is explicit.
+  manage_volume: false
+  # Used automatically only when manage_volume is true.
   volume: 35
   restore_previous_volume: true
   connect_timeout: 10

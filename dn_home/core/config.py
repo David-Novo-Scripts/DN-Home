@@ -25,6 +25,7 @@ class VoiceConfig:
     default_voice: str
     rate: str
     pitch: str
+    tts_volume: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,7 @@ class SpeakerConfig:
     name: str
     host: str | None
     port: int
+    manage_volume: bool
     volume: int
     restore_previous_volume: bool
     connect_timeout: float
@@ -109,6 +111,13 @@ def validate_voice_pitch(value: Any, name: str = "voice.pitch") -> str:
     return text
 
 
+def validate_tts_volume(value: Any, name: str = "voice.tts_volume") -> str:
+    text = str(value).strip()
+    if RATE_PATTERN.fullmatch(text) is None:
+        raise ConfigError(f"'{name}' must use a signed percentage such as +0%")
+    return text
+
+
 def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
     """Load and validate the Phase 1 YAML configuration."""
 
@@ -157,12 +166,14 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
             default_voice=str(voice.get("default_voice", "pt-PT-DuarteNeural")).strip(),
             rate=validate_voice_rate(voice.get("rate", "+0%")),
             pitch=validate_voice_pitch(voice.get("pitch", "+0Hz")),
+            tts_volume=validate_tts_volume(voice.get("tts_volume", "+0%")),
         ),
         speaker=SpeakerConfig(
             provider=str(speaker.get("provider", "cast")).strip().lower(),
             name=name,
             host=host,
             port=speaker_port,
+            manage_volume=bool(speaker.get("manage_volume", False)),
             volume=speaker_volume,
             restore_previous_volume=bool(speaker.get("restore_previous_volume", True)),
             connect_timeout=_number(

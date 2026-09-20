@@ -36,7 +36,7 @@ class Speaker(ABC):
         self,
         asset: AudioAsset,
         *,
-        volume: int,
+        volume: int | None,
         restore_previous_volume: bool,
     ) -> PlaybackResult:
         """Play a generated audio asset."""

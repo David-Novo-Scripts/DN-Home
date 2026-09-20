@@ -33,9 +33,11 @@ def test_load_config_resolves_values(tmp_path: Path) -> None:
 
     assert config.resident_name == "David"
     assert config.speaker.host == "192.168.20.40"
+    assert config.speaker.manage_volume is False
     assert config.speaker.volume == 35
     assert config.voice.rate == "+0%"
     assert config.voice.pitch == "+0Hz"
+    assert config.voice.tts_volume == "+0%"
     assert config.network.lan_ip is None
     assert config.http.port == 8765
     assert config.logging.file == tmp_path / "logs" / "test.log"
@@ -84,7 +86,11 @@ def test_loads_valid_voice_prosody(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("setting", "value", "error_name"),
-    (("rate", "8%", "voice.rate"), ("pitch", "-5", "voice.pitch")),
+    (
+        ("rate", "8%", "voice.rate"),
+        ("pitch", "-5", "voice.pitch"),
+        ("tts_volume", "0%", "voice.tts_volume"),
+    ),
 )
 def test_rejects_invalid_voice_prosody(
     tmp_path: Path, setting: str, value: str, error_name: str
@@ -98,3 +104,15 @@ def test_rejects_invalid_voice_prosody(
 
     with pytest.raises(ConfigError, match=error_name):
         load_config(path)
+
+
+def test_can_enable_automatic_cast_volume_management(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    text = VALID_CONFIG.replace(
+        "  volume: 35", "  manage_volume: true\n  volume: 35"
+    )
+    path.write_text(text, encoding="utf-8")
+
+    config = load_config(path)
+
+    assert config.speaker.manage_volume is True

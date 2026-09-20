@@ -29,10 +29,15 @@ class FakeTTSEngine:
 
 
 class FakeSpeaker:
+    last_volume = None
+    last_restore = None
+
     def __init__(self, *args, **kwargs) -> None:
         pass
 
     def speak(self, asset, *, volume, restore_previous_volume):
+        FakeSpeaker.last_volume = volume
+        FakeSpeaker.last_restore = restore_previous_volume
         return PlaybackResult(
             device_name="Bedroom",
             completed=True,
@@ -51,8 +56,16 @@ class FakeSpeaker:
 @pytest.mark.parametrize(
     ("rate", "pitch", "expected_options"),
     (
-        ("+8%", "-5Hz", {"rate": "+8%", "pitch": "-5Hz"}),
-        (None, None, {"rate": "+0%", "pitch": "+0Hz"}),
+        (
+            "+8%",
+            "-5Hz",
+            {"rate": "+8%", "pitch": "-5Hz", "tts_volume": "+0%"},
+        ),
+        (
+            None,
+            None,
+            {"rate": "+0%", "pitch": "+0Hz", "tts_volume": "+0%"},
+        ),
     ),
 )
 @pytest.mark.asyncio
@@ -79,9 +92,14 @@ async def test_speak_logs_latency_to_audio_start(
     )
     config = SimpleNamespace(
         voice=SimpleNamespace(
-            default_voice="pt-PT-DuarteNeural", rate="+0%", pitch="+0Hz"
+            default_voice="pt-PT-DuarteNeural",
+            rate="+0%",
+            pitch="+0Hz",
+            tts_volume="+0%",
         ),
-        speaker=SimpleNamespace(volume=35, restore_previous_volume=True),
+        speaker=SimpleNamespace(
+            manage_volume=False, volume=35, restore_previous_volume=True
+        ),
         network=SimpleNamespace(),
         http=SimpleNamespace(),
     )
@@ -92,6 +110,8 @@ async def test_speak_logs_latency_to_audio_start(
     assert result == 0
     assert FakeTTSEngine.asset.cleaned is True
     assert FakeTTSEngine.options == expected_options
+    assert FakeSpeaker.last_volume is None
+    assert FakeSpeaker.last_restore is True
     latency_log = next(
         record.getMessage()
         for record in caplog.records
@@ -127,6 +147,24 @@ def test_speak_parser_accepts_prosody_overrides() -> None:
 
     assert args.rate == "+8%"
     assert args.pitch == "-5Hz"
+
+
+def test_cast_volume_is_untouched_by_default() -> None:
+    speaker = SimpleNamespace(manage_volume=False, volume=35)
+
+    assert cli._requested_cast_volume(None, speaker) is None
+
+
+def test_explicit_cast_volume_overrides_disabled_management() -> None:
+    speaker = SimpleNamespace(manage_volume=False, volume=35)
+
+    assert cli._requested_cast_volume(55, speaker) == 55
+
+
+def test_previous_automatic_volume_behavior_can_be_enabled() -> None:
+    speaker = SimpleNamespace(manage_volume=True, volume=35)
+
+    assert cli._requested_cast_volume(None, speaker) == 35
 
 
 @pytest.mark.parametrize(

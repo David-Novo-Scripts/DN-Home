@@ -526,6 +526,16 @@ O volume do Nest deve poder ser definido através da configuração e da CLI.
 O restauro do volume anterior do Nest depois da reprodução deve ser
 configurável e não obrigatório.
 
+Por omissão, `speaker.manage_volume` deve ser false. Nesse modo, uma execução
+sem `--volume` não deve chamar `set_volume`, não deve restaurar volume e deve
+preservar integralmente o volume físico atual do Nest. Um `--volume` explícito
+continua autorizado a alterar o volume Cast. O comportamento automático
+anterior pode ser ativado com `speaker.manage_volume: true`, usando então
+`speaker.volume` quando a CLI não indicar um valor.
+
+Só deve existir tentativa de restauro quando esta execução tiver efetivamente
+alterado o volume físico do Nest.
+
 ========================
 12. TEXT TO SPEECH
 ========================
@@ -576,9 +586,9 @@ overrides CLI:
 
 Os parâmetros CLI `--rate` e `--pitch` devem sobrepor apenas a execução atual e
 manter compatibilidade com comandos que não os indiquem. O Edge TTS também
-suporta volume de síntese em percentagem, mas nesta fase esse parâmetro fica no
-default +0% e não é exposto pela CLI. O volume TTS é distinto do volume Cast do
-Nest configurado por `--volume`.
+suporta volume de síntese em percentagem. Esse ganho deve ser configurável em
+`voice.tts_volume`, com default +0%, e não precisa de override CLI nesta fase.
+O volume TTS é distinto do volume Cast do Nest configurado por `--volume`.
 
 A mesma voz deverá futuramente ser usada para:
 - boas-vindas;

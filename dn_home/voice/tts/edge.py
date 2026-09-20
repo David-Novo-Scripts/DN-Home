@@ -17,10 +17,18 @@ LOGGER = logging.getLogger(__name__)
 
 
 class EdgeTTSEngine(TTSEngine):
-    def __init__(self, default_voice: str, *, rate: str = "+0%", pitch: str = "+0Hz"):
+    def __init__(
+        self,
+        default_voice: str,
+        *,
+        rate: str = "+0%",
+        pitch: str = "+0Hz",
+        tts_volume: str = "+0%",
+    ):
         self.default_voice = default_voice
         self.rate = rate
         self.pitch = pitch
+        self.tts_volume = tts_volume
 
     async def list_voices(self, language: str | None = None) -> list[Voice]:
         try:
@@ -53,6 +61,7 @@ class EdgeTTSEngine(TTSEngine):
                 selected_voice,
                 rate=self.rate,
                 pitch=self.pitch,
+                volume=self.tts_volume,
             )
             await communicate.save(str(output))
             if not output.is_file() or output.stat().st_size == 0:
@@ -64,11 +73,12 @@ class EdgeTTSEngine(TTSEngine):
                 raise
             raise TTSError(f"Edge TTS generation failed: {error}") from error
         LOGGER.info(
-            "event=tts.generated engine=edge voice=%s rate=%s pitch=%s bytes=%d "
-            "tts_generation_ms=%d result=success",
+            "event=tts.generated engine=edge voice=%s rate=%s pitch=%s "
+            "tts_volume=%s bytes=%d tts_generation_ms=%d result=success",
             selected_voice,
             self.rate,
             self.pitch,
+            self.tts_volume,
             output.stat().st_size,
             round((time.monotonic() - started) * 1000),
         )

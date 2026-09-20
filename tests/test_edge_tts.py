@@ -39,12 +39,16 @@ async def test_passes_rate_and_pitch_to_edge_tts(
 ) -> None:
     monkeypatch.setattr(edge.edge_tts, "Communicate", FakeCommunicate)
     engine = edge.EdgeTTSEngine(
-        "pt-PT-DuarteNeural", rate="+8%", pitch="-5Hz"
+        "pt-PT-DuarteNeural", rate="+8%", pitch="-5Hz", tts_volume="+3%"
     )
 
     asset = await engine.generate("Olá David")
     try:
-        assert FakeCommunicate.last_options == {"rate": "+8%", "pitch": "-5Hz"}
+        assert FakeCommunicate.last_options == {
+            "rate": "+8%",
+            "pitch": "-5Hz",
+            "volume": "+3%",
+        }
     finally:
         asset.cleanup()
 

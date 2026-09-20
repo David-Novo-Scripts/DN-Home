@@ -52,11 +52,18 @@ python -m dn_home speak --voice pt-PT-DuarteNeural --rate "+8%" \
 
 `--rate` uses a signed percentage and `--pitch` uses signed Hz. If omitted,
 they default to `voice.rate` and `voice.pitch` in the YAML configuration. Nest
-volume is separate from TTS prosody.
+volume is separate from TTS prosody and from the generated audio gain selected
+by `voice.tts_volume`.
 
 Use `--no-restore-volume` if the requested volume should remain configured on
 the Nest after playback. By default the value comes from
 `speaker.restore_previous_volume`.
+
+With the default `speaker.manage_volume: false`, DN Home leaves the Nest's
+physical volume untouched unless `--volume` is explicitly supplied. Set
+`speaker.manage_volume: true` only if every normal playback should apply the
+configured `speaker.volume`. Volume restoration is attempted only after DN Home
+actually changes the Nest volume.
 
 ## Networking and privacy
 

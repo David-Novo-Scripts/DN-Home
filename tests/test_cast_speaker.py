@@ -72,6 +72,7 @@ def _speaker() -> CastSpeaker:
             name="Bedroom",
             host="192.168.20.40",
             port=8009,
+            manage_volume=False,
             volume=35,
             restore_previous_volume=True,
             connect_timeout=2,
@@ -142,3 +143,32 @@ def test_volume_restore_can_be_disabled(
     )
 
     assert fake_cast.volumes == [0.4]
+
+
+def test_volume_is_not_changed_or_restored_when_not_requested(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    speaker = _speaker()
+    fake_cast = FakeCast()
+    device = CastDeviceInfo("Bedroom", "Nest Mini", "Google", "192.168.20.40", 8009)
+    monkeypatch.setattr(cast_module, "TemporaryAudioServer", FakeAudioServer)
+    monkeypatch.setattr(
+        speaker,
+        "select_network",
+        lambda: NetworkSelection("192.168.20.10", "br0", "192.168.20.40", "route"),
+    )
+    monkeypatch.setattr(speaker, "_connect", lambda: (fake_cast, device))
+    monkeypatch.setattr(
+        speaker, "_wait_for_completion", lambda cast, started: time.monotonic()
+    )
+    path = tmp_path / "speech.tts.mp3"
+    path.write_bytes(b"ID3")
+
+    speaker.speak(
+        AudioAsset(path, "audio/mpeg"),
+        volume=None,
+        restore_previous_volume=True,
+    )
+
+    assert fake_cast.volumes == []
+    assert fake_cast.disconnected is True
