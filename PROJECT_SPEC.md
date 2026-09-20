@@ -258,8 +258,26 @@ house:
 
 resident:
   home: true/false
+  identity: DAVID_CONFIRMED/UNKNOWN
+  presence_confidence:
+  presence_evidence:
   last_arrival:
   last_departure:
+
+entry:
+  classification: DAVID_CONFIRMED/EXPECTED_VISITOR/UNKNOWN/UNEXPECTED_ENTRY
+  incident_id:
+
+visits:
+  active:
+  next_scheduled:
+
+desktop:
+  state: OFFLINE/WAKING/ONLINE
+
+security:
+  incident: OPEN/ACKNOWLEDGED/CLOSED
+  recorder: UNKNOWN/STARTING/READY/FAILED
 
 door:
   state: open/closed
@@ -341,6 +359,25 @@ phone.incoming_call
 briefing.ready
 wakeword.detected
 transit.updated
+presence.device_seen
+presence.device_lost
+presence.resident_confirmed
+visit.scheduled
+visit.started
+visit.completed
+visit.expired
+visit.cancelled
+security.unexpected_entry
+desktop.wake_requested
+desktop.online
+desktop.wake_failed
+security.recorder_ready
+security.recorder_failed
+
+Eventos relacionados com uma mesma abertura, decisão ou incidente devem poder
+transportar metadados de correlação, como `incident_id`, timestamp, origem e
+identificador do evento inicial. Isto permite auditoria, deduplicação e
+idempotência sem acoplar sensores diretamente às ações.
 
 Pode existir um EventBus simples interno em Python.
 
@@ -363,6 +400,9 @@ skills/
 ├── briefing/
 ├── card/
 ├── keys/
+├── presence/
+├── visits/
+├── security/
 └── conversation/
 
 Uma skill deve poder:
@@ -576,6 +616,30 @@ E testar:
 python -m dn_home speak --voice <voice> "Olá David. Esta é a voz da tua casa."
 
 Quero poder mudar facilmente a voz global da casa.
+
+A arquitetura de TTS deve suportar:
+
+- um motor principal configurável;
+- um ou mais motores de fallback ordenados e configuráveis;
+- adaptadores locais, online ou executados remotamente noutro host da LAN;
+- timeouts, health checks e falha controlada por adaptador;
+- seleção de idioma/voz por mensagem quando uma automação o exigir;
+- uma representação comum do áudio gerado, independente do destino de
+  reprodução.
+
+O motor de voz premium definitivo ainda não está escolhido. O Edge TTS pode
+continuar como fallback atual enquanto essa escolha não estiver concluída.
+Falhar ou trocar de motor não deve exigir alterações no módulo Google Cast.
+
+`TTSEngine` não deve conhecer o Google Nest, URLs Cast nem detalhes do servidor
+HTTP. Deve apenas transformar texto e parâmetros de voz num media asset ou
+stream descrito por uma interface comum. O módulo Speaker/Cast recebe esse
+resultado e trata separadamente da entrega e reprodução.
+
+Um motor TTS remoto na LAN deve ser tratado como integração configurável, sem
+IP ou hostname hardcoded, com timeout e fallback. Texto sensível não deve ser
+enviado para motores externos ou remotos sem configuração explícita compatível
+com a política de privacidade.
 
 O adaptador Edge TTS deve aceitar prosódia opcional através de configuração e
 overrides CLI:
@@ -988,6 +1052,12 @@ Quero futuramente combinar sinais:
 - BLE tags;
 - outros sensores.
 
+Entre os sinais previstos estão a presença Bluetooth/BLE da pulseira Amazfit e
+a presença do iPhone. Ambos são evidência de presença, não autenticação
+criptográfica. Não assumir que um dispositivo detetado prova de forma absoluta
+quem entrou, nem que a ausência momentânea de BLE prova que David não está
+presente.
+
 Objetivo:
 
 resident.arrived
@@ -1000,6 +1070,231 @@ serem eventos inferidos de forma razoavelmente robusta.
 
 Se a confiança for baixa:
 → não executar automações potencialmente irritantes.
+
+========================
+19.1. IDENTIDADE E CLASSIFICAÇÃO DE ENTRADA
+========================
+
+A identificação de David não deve depender de um único sinal. Deve existir um
+agregador de presença que combine evidência recente, qualidade/frescura dos
+sinais e estado anterior da casa.
+
+Depois de uma abertura ou evento candidato a entrada deve existir um grace
+period curto e configurável para recolher sinais antes da classificação final.
+Durante esse período o estado pode permanecer UNKNOWN.
+
+Separar conceptualmente:
+
+resident.identity:
+- DAVID_CONFIRMED
+- UNKNOWN
+
+entry.classification:
+- DAVID_CONFIRMED
+- EXPECTED_VISITOR
+- UNKNOWN
+- UNEXPECTED_ENTRY
+
+O estado deve guardar confidence e evidência suficiente para explicar a
+decisão, sem transformar RSSI ou um único identificador BLE numa verdade
+absoluta. Futuramente podem ser adicionados outros sinais sem reescrever as
+automações consumidoras.
+
+UNKNOWN não significa automaticamente intrusão. UNEXPECTED_ENTRY significa
+operacionalmente que a entrada não foi associada a David nem a uma visita
+planeada após o grace period; não constitui prova da identidade ou intenção da
+pessoa.
+
+========================
+19.2. VISITAS E INTERVENÇÕES PLANEADAS
+========================
+
+Deve ser possível registar previamente uma visita ou intervenção, incluindo
+por exemplo manutenção, técnico, residência, inspeção ou outra pessoa
+autorizada.
+
+Cada registo deve conter pelo menos:
+
+- descrição;
+- início e fim da janela temporal, com timezone explícito;
+- nome e/ou empresa opcionais;
+- estado SCHEDULED, ACTIVE, COMPLETED, CANCELLED ou EXPIRED;
+- identificador estável para correlação e auditoria.
+
+Uma abertura dentro de uma janela autorizada, sem David confirmado, deve poder
+ser classificada como EXPECTED_VISITOR e não deve gerar imediatamente uma
+entrada inesperada.
+
+Eventos previstos:
+
+visit.scheduled
+visit.started
+visit.completed
+visit.expired
+visit.cancelled
+
+O mecanismo de criação/alteração destas autorizações deve ser validado e
+auditável. Uma mensagem livre recebida de ChatGPT não pode, por si só, criar ou
+ativar uma autorização.
+
+As definições e transições de estado devem viver no State Store ou num
+repositório próprio por ele coordenado, e não dentro da automação que reage à
+porta.
+
+========================
+19.3. DECISÃO DE ENTRADA INESPERADA
+========================
+
+Fluxo conceptual:
+
+1. Um evento de abertura/entrada cria um candidato com identificador de
+   correlação.
+2. O DN_Home inicia o grace period e tenta confirmar David através dos sinais
+   de presença disponíveis.
+3. Em paralelo, verifica visitas/intervenções planeadas aplicáveis à janela
+   temporal.
+4. Se David for confirmado, emite o fluxo normal de chegada.
+5. Se existir uma visita aplicável, classifica EXPECTED_VISITOR e não cria
+   aviso de entrada inesperada.
+6. Se o grace period terminar sem David confirmado nem visita aplicável,
+   classifica UNEXPECTED_ENTRY e emite `security.unexpected_entry`.
+
+Sensores indisponíveis ou stale devem constar da evidência e dos logs. A
+política deve privilegiar a redução de falsos positivos, mas continuar capaz de
+tratar uma entrada não planeada de forma conservadora e configurável.
+
+A reação futura a `security.unexpected_entry` deve ser configurável e composta
+por ações independentes, para que a falha de uma não impeça as restantes:
+
+- pedir Wake-on-LAN do desktop Windows;
+- aguardar, com timeout, que o host fique acessível;
+- verificar, quando suportado, o health/status do gravador;
+- criar imediatamente uma notificação prioritária para David;
+- reproduzir uma única vez um aviso de voz configurado dentro da casa.
+
+Estas operações devem passar pela camada normal de actions validadas. A
+automação de segurança coordena pedidos e estados; não deve executar shell
+arbitrário nem chamar diretamente implementações específicas.
+
+A notificação não deve ficar bloqueada à espera de o desktop ou gravador ficar
+READY. Atualizações posteriores podem comunicar a mudança de estado do
+gravador no mesmo incidente.
+
+O aviso de voz deve ser state-aware e baseado apenas em estados confirmados:
+
+1. Antes de `security.recorder` estar READY, a mensagem pode informar que foi
+   detetada uma entrada não planeada, que David será alertado e que o sistema
+   de segurança está a ser ativado. Não deve afirmar que existe vídeo ou
+   gravação ativa.
+2. Depois de `security.recorder` estar READY, a mensagem pode incluir o aviso
+   configurado de que existe vídeo, gravação ou ambos em estado ativo.
+
+A segunda regra também pode aplicar-se antes de o recorder principal ficar
+READY se existir outro sistema de gravação independente cujo estado ativo
+tenha sido comprovado. O simples pedido de arranque, estado STARTING, desktop
+ONLINE ou envio de Wake-on-LAN não é prova de gravação.
+
+Os templates, a formulação francesa concreta, o idioma e a voz não devem estar
+hardcoded. Cada template pode ser reproduzido no máximo uma vez por transição
+de estado do mesmo incidente; o aviso posterior a READY é configurável e não
+deve bloquear nem repetir as restantes ações.
+
+========================
+19.4. WAKE-ON-LAN DO DESKTOP
+========================
+
+Criar futuramente uma abstração de device/service para o desktop:
+
+devices.desktop:
+  state:
+    OFFLINE
+    WAKING
+    ONLINE
+
+actions:
+  desktop.wake
+  desktop.check_online
+
+Hostname, MAC, interface, endereço de broadcast e eventual IP de verificação
+devem ser configuráveis. Não assumir IP fixo nem uma interface LAN específica.
+
+Wake-on-LAN deve ter:
+
+- cooldown;
+- número limitado de retries;
+- timeout total;
+- logs por tentativa e resultado;
+- idempotência por incidente;
+- proibição de repetir magic packets indefinidamente.
+
+Uma mudança futura de subnet deve exigir apenas configuração. Um pedido de
+Wake-on-LAN aceite não significa que o desktop já esteja online nem que exista
+gravação ativa.
+
+========================
+19.5. FRIGATE / GRAVADOR
+========================
+
+Nesta arquitetura o DN_Home não implementa diretamente toda a gravação de
+vídeo. A responsabilidade inicial será:
+
+DN_Home
+→ Wake-on-LAN desktop
+→ Windows inicia os componentes já configurados
+→ DN_Home verifica futuramente health/status quando existir integração
+
+Abstração futura:
+
+security.recorder:
+  UNKNOWN
+  STARTING
+  READY
+  FAILED
+
+Eventos:
+
+security.recorder_ready
+security.recorder_failed
+
+Não assumir que ONLINE ou um Wake-on-LAN bem-sucedido significa que o sistema
+já está a gravar. A definição concreta de READY deve corresponder a um health
+check do componente efetivamente responsável pela gravação.
+
+========================
+19.6. NOTIFICAÇÃO PRIORITÁRIA
+========================
+
+Uma entrada inesperada deve criar uma notificação prioritária associada ao
+mesmo `incident_id`. O canal poderá futuramente ser Telegram, push ou outro
+provider configurado.
+
+Conteúdo conceptual:
+
+"Entrada não planeada detetada em casa.
+David não foi identificado e não existe uma intervenção planeada ativa.
+Desktop/gravador: <estado>.
+Hora: <timestamp>."
+
+Templates, idioma, canal, retries e política de atualização devem ser
+configuráveis. Não implementar o canal nesta fase.
+
+O estado deve distinguir pelo menos notificação PENDING, SENT e FAILED. O
+DN_Home não deve afirmar nem registar que David foi efetivamente notificado
+enquanto a action/provider não confirmar sucesso. Uma tentativa iniciada ou
+colocada em fila continua PENDING.
+
+========================
+19.7. INDEPENDÊNCIA DE CHATGPT
+========================
+
+A deteção, agregação de presença, classificação, criação de incidente,
+Wake-on-LAN, arranque/verificação do gravador e notificação devem funcionar sem
+ChatGPT e sem Internet quando as dependências locais o permitirem.
+
+ChatGPT poderá futuramente ajudar a formular mensagens ou conversar, mas não é
+autoridade para decidir se a casa deve proteger, notificar ou iniciar o
+gravador. Estas decisões pertencem a automações locais, determinísticas,
+configuradas e auditáveis.
 
 ========================
 20. EXEMPLO DE ARRIVAL
@@ -1089,6 +1384,23 @@ apenas uma reprodução automática por dia.
 
 O sistema deverá recordar eventos recentes suficientes para evitar automações absurdas.
 
+Para segurança deve existir ainda um conceito explícito de incidente:
+
+security incident:
+  incident_id:
+  state: OPEN/ACKNOWLEDGED/CLOSED
+  opened_at:
+  classification:
+  actions_requested:
+  actions_completed:
+
+Uma única abertura/entrada não deve provocar vários avisos de voz, vários
+Wake-on-LAN nem dezenas de notificações. Enquanto existir um incidente OPEN ou
+ACKNOWLEDGED aplicável, eventos repetidos devem ser correlacionados ou
+deduplicados em vez de criar outro incidente. Cooldowns e chaves de
+idempotência devem existir por ação. Fechar ou reabrir incidentes deve ser uma
+transição explícita e registada.
+
 ========================
 23. PRIVACIDADE
 ========================
@@ -1102,7 +1414,18 @@ Por defeito:
 - não guardar conversas de microfone desnecessariamente;
 - não enviar áudio para serviços externos sem configuração explícita;
 - logs não devem guardar segredos;
-- não guardar conteúdos sensíveis sem necessidade.
+- não guardar conteúdos sensíveis sem necessidade;
+- presença BLE é evidência e não autenticação forte;
+- UNKNOWN não deve ser registado ou comunicado como certeza de intrusão;
+- guardar apenas o estado/evidência de presença necessário à decisão;
+- não conservar identificadores ou histórico de rastreamento para além da
+  retenção configurada e necessária;
+- logs de presença, visitas e incidentes não devem conter dados pessoais
+  desnecessários;
+- gravação e avisos devem respeitar a configuração da instalação e as regras
+  aplicáveis;
+- decisões e ações de segurança devem ser auditáveis através de eventos e
+  logs correlacionados.
 
 Quero poder configurar níveis de logging.
 
@@ -1145,9 +1468,58 @@ house:
   resident_name: David
 
 voice:
+  primary_engine:
+  fallback_engines: []
   default_voice:
-  volume:
+  tts_volume: "+0%"
   language: pt-PT
+
+speaker:
+  manage_volume: false
+  volume:
+  restore_volume:
+
+tts_engines:
+  edge:
+    enabled: true
+  premium:
+    type: local/lan_remote/online
+    endpoint:
+
+presence:
+  grace_seconds:
+  resident_devices:
+    amazfit:
+    iphone:
+
+visits:
+  timezone:
+  retention_days:
+
+devices:
+  desktop:
+    hostname:
+    mac:
+    wol_interface:
+    wol_broadcast:
+    cooldown_seconds:
+    retries:
+    timeout_seconds:
+
+security:
+  unexpected_entry:
+    enabled:
+    voice_warning:
+      language: fr-FR
+      before_recorder_ready_text:
+      recorder_ready_text:
+      recording_notice_mode: video/audio/both
+  recorder:
+    health_endpoint:
+    startup_timeout_seconds:
+  notifications:
+    provider:
+    priority:
 
 nest:
   name:
@@ -1183,7 +1555,16 @@ Principalmente para:
 - parsing;
 - actions;
 - cooldown;
-- skill routing.
+- skill routing;
+- agregação e frescura dos sinais de presença;
+- grace period e estados UNKNOWN;
+- precedência entre David confirmado, visita planeada e entrada inesperada;
+- limites temporais, cancelamento e expiração de visitas;
+- criação/deduplicação/transições de incidentes;
+- cooldown, retries e timeout de Wake-on-LAN;
+- distinção entre desktop ONLINE e recorder READY;
+- falhas independentes de voz, notificação, desktop e recorder;
+- funcionamento da decisão de segurança sem ChatGPT.
 
 Hardware deverá poder ser mockado.
 
@@ -1215,7 +1596,12 @@ Que mostrem:
 - Internet;
 - chat;
 - TTS;
-- microfone.
+- microfone;
+- sinais de presença e respetiva frescura;
+- visitas planeadas ativas;
+- estado do desktop/Wake-on-LAN;
+- estado/health do gravador;
+- notificações prioritárias, quando existir provider.
 
 Sem expor segredos.
 
@@ -1238,12 +1624,27 @@ DN_Home/
 │   │   ├── switchbot.py
 │   │   ├── nfc.py
 │   │   ├── ble_presence.py
+│   │   ├── phone_presence.py
 │   │   └── occupancy.py
 │   │
 │   ├── devices/
 │   │   ├── nest.py
 │   │   ├── lights.py
+│   │   ├── desktop.py
 │   │   └── phone.py
+│   │
+│   ├── presence/
+│   │   └── aggregator.py
+│   │
+│   ├── visits/
+│   │   └── scheduler.py
+│   │
+│   ├── security/
+│   │   ├── incidents.py
+│   │   └── recorder.py
+│   │
+│   ├── notifications/
+│   │   └── base.py
 │   │
 │   ├── voice/
 │   │   ├── tts/
@@ -1258,6 +1659,9 @@ DN_Home/
 │   │   ├── reminders/
 │   │   ├── phone/
 │   │   ├── briefing/
+│   │   ├── presence/
+│   │   ├── visits/
+│   │   ├── security/
 │   │   └── conversation/
 │   │
 │   ├── intelligence/
@@ -1268,6 +1672,7 @@ DN_Home/
 │   ├── automations/
 │   │   ├── arrival.py
 │   │   ├── departure.py
+│   │   ├── unexpected_entry.py
 │   │   ├── card_reminder.py
 │   │   ├── morning_briefing.py
 │   │   └── incoming_call.py
@@ -1357,6 +1762,24 @@ Se transit API falhar:
 
 Se um sensor ficar offline:
 → estado deve indicar unknown/stale, não inventar valor.
+
+Se Amazfit ou iPhone não forem detetados:
+→ não concluir imediatamente que David está ausente; respeitar grace period,
+frescura e restantes sinais.
+
+Se Wake-on-LAN falhar:
+→ limitar retries, registar `desktop.wake_failed` e continuar a notificação e
+as restantes ações possíveis.
+
+Se o desktop ficar ONLINE mas o gravador não ficar READY:
+→ manter estados distintos, emitir `security.recorder_failed` após timeout e
+atualizar o incidente/notificação sem assumir gravação.
+
+Se TTS ou Nest falharem durante uma entrada inesperada:
+→ não bloquear Wake-on-LAN, verificação do gravador ou notificação.
+
+Se ChatGPT estiver indisponível:
+→ toda a classificação e reação base de segurança continua funcional.
 
 ========================
 31. PERFORMANCE
@@ -1509,7 +1932,14 @@ Não implementar ainda:
 - STT;
 - wake word;
 - iPhone;
-- ANCS.
+- ANCS;
+- identificação de presença Amazfit/iPhone;
+- visitas/intervenções planeadas;
+- classificação de entrada inesperada;
+- Wake-on-LAN do desktop;
+- integração Frigate/gravador;
+- notificações prioritárias;
+- incidentes de segurança.
 
 Apenas deixar arquitetura preparada.
 
