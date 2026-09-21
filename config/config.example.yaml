@@ -34,6 +34,68 @@ http:
   port: 8765
   request_timeout: 20
 
+audio_input:
+  provider: alsa_arecord
+  # Stable ALSA card name; do not use the volatile numeric card index.
+  device: "plughw:CARD=C925e,DEV=0"
+  sample_rate: 16000
+  channels: 1
+  sample_format: S16_LE
+  frame_ms: 10
+
+wake_word:
+  engine: openwakeword
+  model_path: models/wakeword/hey_jarvis_v0.1.onnx
+  threshold: 0.5
+  vad_threshold: 0.5
+
+vad:
+  threshold: 0.5
+  speech_start_timeout_seconds: 5
+  end_silence_ms: 800
+  max_utterance_seconds: 15
+  pre_roll_ms: 250
+
+stt:
+  engine: whisper_cpp
+  binary_path: vendor/whisper.cpp/build/bin/whisper-cli
+  model_path: models/stt/ggml-base-q5_1.bin
+  language: pt
+  threads: 4
+  prompt: "Jarvis, RER, Paris, Lognes"
+
+assistant:
+  cooldown_seconds: 2
+  # Transcripts can contain private speech and are not logged by default.
+  log_transcripts: false
+
+transit:
+  provider: idfm_navitia
+  api_base: https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia
+  token_env: IDFM_API_TOKEN
+  line:
+    name: "RER A"
+    id: "IDFM:C01742"
+    code: "A"
+    commercial_mode: "RER"
+  origin:
+    name: "Noisy-le-Grand - Mont d'Est"
+    stop_id: "IDFM:monomodalStopPlace:474082"
+    navitia_id: "stop_area:IDFM:412697"
+    monitoring_ref: "STIF:StopArea:SP:474082:"
+  destinations:
+    work:
+      name: "Lognes"
+      stop_id: "IDFM:monomodalStopPlace:43152"
+      navitia_id: "stop_area:IDFM:68123"
+      monitoring_ref: "STIF:StopArea:SP:43152:"
+    paris:
+      name: "Nation"
+      stop_id: "IDFM:monomodalStopPlace:473875"
+      navitia_id: "stop_area:IDFM:71673"
+  timeout_seconds: 10
+  result_count: 2
+
 logging:
   level: INFO
   file: logs/dn_home.log

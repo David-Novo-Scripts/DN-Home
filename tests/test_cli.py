@@ -149,6 +149,33 @@ def test_speak_parser_accepts_prosody_overrides() -> None:
     assert args.pitch == "-5Hz"
 
 
+def test_transit_next_parser() -> None:
+    args = cli._parser().parse_args(["transit", "next", "--to", "work"])
+
+    assert args.command == "transit"
+    assert args.transit_command == "next"
+    assert args.to == "work"
+
+
+def test_voice_poc_parsers() -> None:
+    mic = cli._parser().parse_args(["mic", "test", "--seconds", "3"])
+    wake = cli._parser().parse_args(
+        ["wakeword", "benchmark", "--seconds", "20", "--expected", "2"]
+    )
+    stt = cli._parser().parse_args(
+        ["stt", "benchmark", "--model", "models/stt/model.bin"]
+    )
+    assistant = cli._parser().parse_args(
+        ["assistant", "--once", "--max-wait-seconds", "30"]
+    )
+
+    assert mic.mic_command == "test" and mic.seconds == 3
+    assert wake.wakeword_command == "benchmark" and wake.expected == 2
+    assert wake.countdown == 3
+    assert stt.stt_command == "benchmark" and len(stt.model) == 1
+    assert assistant.once is True and assistant.max_wait_seconds == 30
+
+
 def test_cast_volume_is_untouched_by_default() -> None:
     speaker = SimpleNamespace(manage_volume=False, volume=35)
 

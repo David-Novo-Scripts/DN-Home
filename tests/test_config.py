@@ -21,6 +21,25 @@ network: {}
 http: {}
 logging:
   file: logs/test.log
+transit:
+  line:
+    name: RER A
+    id: IDFM:C01742
+    code: A
+    commercial_mode: RER
+  origin:
+    name: Noisy-le-Grand - Mont d'Est
+    stop_id: IDFM:monomodalStopPlace:474082
+    navitia_id: stop_area:IDFM:412697
+  destinations:
+    work:
+      name: Lognes
+      stop_id: IDFM:monomodalStopPlace:43152
+      navitia_id: stop_area:IDFM:68123
+    paris:
+      name: Nation
+      stop_id: IDFM:monomodalStopPlace:473875
+      navitia_id: stop_area:IDFM:71673
 """
 
 
@@ -40,6 +59,12 @@ def test_load_config_resolves_values(tmp_path: Path) -> None:
     assert config.voice.tts_volume == "+0%"
     assert config.network.lan_ip is None
     assert config.http.port == 8765
+    assert config.audio_input.device == "default"
+    assert config.wake_word.engine == "openwakeword"
+    assert config.stt.language == "pt"
+    assert config.transit.origin.stop_id == "IDFM:monomodalStopPlace:474082"
+    assert config.transit.destinations["work"].stop_id == "IDFM:monomodalStopPlace:43152"
+    assert config.transit.destinations["paris"].stop_id == "IDFM:monomodalStopPlace:473875"
     assert config.logging.file == tmp_path / "logs" / "test.log"
 
 

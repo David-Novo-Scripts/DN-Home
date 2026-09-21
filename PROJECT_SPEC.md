@@ -666,15 +666,16 @@ A mesma voz deverá futuramente ser usada para:
 13. RECONHECIMENTO DE VOZ
 ========================
 
-Futuramente quero interação bidirecional.
+O caminho de voz deve ser local-first, modular e orientado a eventos. A primeira
+PoC pode correr em foreground e não requer systemd.
 
 Fluxo:
 
 microfone
 → wake word
-→ gravação
+→ captura limitada por VAD
 → speech-to-text
-→ intent/ChatGPT
+→ intent/skill local ou, futuramente, conversa
 → resposta
 → TTS
 → Nest
@@ -684,7 +685,45 @@ Wake word:
 
 Quero reconhecimento de português, especialmente Português de Portugal.
 
-Investigar futuramente:
+Devem existir interfaces independentes:
+
+- `AudioInput`/`MicrophoneSource`;
+- `WakeWordEngine`;
+- `VoiceActivityDetector`;
+- `STTEngine`.
+
+O dispositivo ALSA, sample rate, modelo, thresholds, timeouts, cooldown e paths
+dos binários/modelos devem ser configuráveis e não hardcoded. Devem existir
+diagnósticos sem reprodução:
+
+```
+python -m dn_home mic list
+python -m dn_home mic test --seconds 5
+```
+
+O funcionamento normal não deve manter gravação contínua em disco. Em
+`WAIT_WAKE` apenas o motor local de wake word recebe frames e pode existir um
+ring buffer pequeno em RAM. Depois de detetar a wake word, o sistema capta uma
+única utterance, usa VAD/silêncio e timeouts configuráveis e elimina qualquer
+ficheiro temporário depois do STT, incluindo em caso de erro.
+
+Estados mínimos:
+
+```
+WAIT_WAKE -> LISTENING -> PROCESSING -> SPEAKING -> COOLDOWN -> WAIT_WAKE
+```
+
+Durante `SPEAKING` e `COOLDOWN` não devem ser aceites novas wake words. Isto
+evita que o áudio do próprio Nest crie um novo comando. Echo cancellation e
+barge-in ficam fora da primeira PoC.
+
+Para wake word, avaliar e medir localmente openWakeWord e alternativas livres
+adequadas ao Raspberry Pi. O modelo, incluindo eventual modelo personalizado
+para “Jarvis”, deve ser substituível por configuração. Um modelo não deve ser
+selecionado apenas por suportar a frase nominalmente: deve ser medido com o
+microfone e a voz reais, incluindo falsos positivos e falsos negativos.
+
+Para STT local, avaliar:
 
 - whisper.cpp
 - faster-whisper, se apropriado
@@ -697,7 +736,7 @@ No Raspberry Pi 5 quero testar pelo menos:
 
 Quero benchmark real.
 
-Criar futuramente um conjunto de frases minhas em PT-PT e comparar:
+Criar um conjunto de frases minhas em PT-PT e comparar:
 
 - accuracy;
 - latency;
@@ -724,6 +763,11 @@ Raspberry Pi
 Nomad
 RMA
 Vítor
+
+O texto transcrito só deve ser incluído em logs quando explicitamente
+configurado. Os logs nunca devem conter áudio. A primeira validação end-to-end
+deve usar saída no terminal; o caminho TTS/Cast só será ativado depois de
+autorização explícita para a primeira reprodução audível.
 
 ========================
 14. CONVERSAÇÃO
@@ -905,11 +949,19 @@ Quero que soe como briefing falado, não como leitura robótica de uma página w
 17. TRANSPORTES / RER A
 ========================
 
-Quero futuramente integrar informação em tempo real da Île-de-France Mobilités / PRIM.
+O módulo deve integrar informação em tempo real da Île-de-France Mobilités / PRIM.
 
 Estação principal:
 
 Noisy-le-Grand–Mont d’Est.
+
+Na primeira PoC, os destinos configurados são:
+
+- `work`: Lognes;
+- `paris`: Nation.
+
+“Paris” significa Nation nesta PoC. Um alias futuro como “Paris centre” poderá
+apontar para Châtelet–Les Halles sem alterar o parser ou provider base.
 
 Quero conseguir perguntar:
 
@@ -965,13 +1017,36 @@ Requisitos:
 - API oficial PRIM preferencialmente;
 - token em `.env`;
 - nunca hardcoded;
+- IDs de origem/destino e aliases apenas em configuração;
+- validação dos IDs contra os referenciais oficiais atuais;
+- distinguir IDs estáticos/monomodal, referências SIRI e IDs Navitia;
+- usar preferencialmente `journeys` origem→destino com
+  `data_freshness=realtime`, em vez de assumir que qualquer passagem na origem
+  serve o destino;
+- aceitar apenas viagens diretas cuja secção de transporte corresponde à
+  linha, origem e destino configurados;
+- Stop Monitoring apenas como diagnóstico/fallback explícito;
 - cache curto;
 - tratar rate limits;
 - tratar timeout;
 - tratar ausência de Internet;
 - interface genérica para futuramente suportar outras redes.
 
-Não implementar nesta fase inicial.
+O parser inicial de intents de trânsito deve ser determinístico e independente
+de ChatGPT. Deve reconhecer apenas as formulações aprovadas para `work` e
+`paris`, mapear para `transit.next(destination=...)` e não inventar ações ou
+horários quando não reconhecer texto ou quando PRIM falhar.
+
+Diagnóstico textual inicial:
+
+```
+python -m dn_home transit next --to work
+python -m dn_home transit next --to paris
+```
+
+Resultado interno mínimo: destino, linha, hora de partida, minutos, direção,
+indicador realtime/planeado e estado. Se realtime não estiver disponível, a
+resposta deve dizê-lo claramente.
 
 ========================
 18. IPHONE / PHONE BRIDGE

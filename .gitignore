@@ -37,8 +37,11 @@ tmp/
 temp/
 .cache/
 data/generated_audio/
+models/
+vendor/
 *.tts.mp3
 *.tts.wav
+*.ses
 
 # Editor and operating-system files
 .idea/
