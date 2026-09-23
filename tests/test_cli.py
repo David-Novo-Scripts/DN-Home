@@ -170,6 +170,7 @@ def test_voice_poc_parsers() -> None:
     )
 
     assert mic.mic_command == "test" and mic.seconds == 3
+    assert mic.countdown == 3
     assert wake.wakeword_command == "benchmark" and wake.expected == 2
     assert wake.countdown == 3
     assert stt.stt_command == "benchmark" and len(stt.model) == 1

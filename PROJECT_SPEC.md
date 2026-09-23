@@ -129,9 +129,8 @@ Atualmente tenho:
 - Google Home/Nest pequeno, cinzento e redondo, já com alguns anos.
 - Provavelmente Google Home Mini ou Nest Mini.
 - iPhone.
-- SwitchBot Contact Sensor já comprado.
-- O SwitchBot deverá chegar aproximadamente dentro de uma semana.
-- Nanoleaf Essentials/Essence, modelo exato a confirmar.
+- SwitchBot Contact Sensor instalado e disponível para PoC BLE local.
+- Nanoleaf Essentials A19, família NL45, HomeKit/Thread non-Matter.
 - Uma lâmpada normal no quarto que futuramente poderá ser substituída por lâmpada RGB inteligente.
 - Um downlight/spot LED encastrado no teto, preso por molas, que futuramente poderá ser substituído por um downlight RGB inteligente compatível.
 - Futuramente poderá existir um leitor NFC PN532 ou semelhante.
@@ -224,9 +223,9 @@ Se não estiver nada esquecido:
 6. SWITCHBOT CONTACT SENSOR
 ========================
 
-Tenho um SwitchBot Contact Sensor.
+Tenho um SwitchBot Contact Sensor instalado.
 
-Quando chegar quero, se possível, comunicar diretamente com ele através de BLE a partir do Raspberry Pi, sem comprar SwitchBot Hub.
+Quero, se possível, comunicar diretamente com ele através de BLE a partir do Raspberry Pi, sem comprar SwitchBot Hub.
 
 Quero obter, se tecnicamente disponível:
 
@@ -241,9 +240,15 @@ door.opened
 door.closed
 door.motion_detected
 
-Não implementar enquanto o hardware ainda não estiver disponível.
+O diagnóstico deve começar por discovery e decoding passivos segundo a BLE
+Open API oficial da SwitchBot. Não fazer reset, pairing ou writes BLE sem
+aprovação explícita. O endereço não deve ser hardcoded antes de o dispositivo
+ser identificado de forma inequívoca.
 
-Mas desenhar a arquitetura já a pensar nisso.
+Os primeiros scans passivos não identificaram ainda advertisements compatíveis
+com Contact Sensor (`FD3D`, legacy `000D` ou device type `0x64`/`d`). Isto é um
+estado de discovery pendente, não prova de ausência ou incompatibilidade do
+sensor.
 
 ========================
 7. ESTADO CENTRAL DA CASA
@@ -440,6 +445,12 @@ Quero futuramente controlar:
 - lâmpada RGB do quarto;
 - downlight RGB do teto;
 - Nanoleaf, se for possível integrá-la localmente.
+
+A Nanoleaf existente foi identificada passivamente como Essentials A19,
+família NL45, HomeKit/Thread non-Matter. Qualquer integração deve respeitar o
+emparelhamento existente. Não assumir suporte à Nanoleaf HTTP OpenAPI, nem
+fazer reset, novo pairing ou alteração de estado sem validação e aprovação
+explícitas.
 
 Quero abstrair fabricantes.
 

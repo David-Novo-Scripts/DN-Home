@@ -9,7 +9,11 @@ from dn_home.assistant import (
 )
 from dn_home.core.config import AssistantConfig
 from dn_home.core.events import EventBus
-from dn_home.skills.transit.base import TransitProvider, TransitUnavailable
+from dn_home.skills.transit.base import (
+    TransitNoDirectService,
+    TransitProvider,
+    TransitUnavailable,
+)
 from dn_home.skills.transit.models import TransitResult
 from dn_home.skills.transit.service import TransitSkill
 from dn_home.voice.input.base import AudioFrame, AudioInput
@@ -62,12 +66,15 @@ class FakeStt(STTEngine):
 
 
 class FakeTransit(TransitProvider):
-    def __init__(self, unavailable: bool = False) -> None:
+    def __init__(self, unavailable: bool = False, no_direct: bool = False) -> None:
         self.destinations: list[str] = []
         self.unavailable = unavailable
+        self.no_direct = no_direct
 
     def next(self, destination: str) -> TransitResult:
         self.destinations.append(destination)
+        if self.no_direct:
+            raise TransitNoDirectService(destination, "RER A")
         if self.unavailable:
             raise TransitUnavailable("offline")
         return TransitResult(
@@ -157,6 +164,17 @@ def test_transit_failure_never_invents_a_timetable() -> None:
 
     assert runtime._handle_command(iter(FakeAudio(2).frames())) is True
     assert output.messages == ["Não foi possível obter horários de transporte agora."]
+
+
+def test_no_direct_service_is_distinct_from_api_failure() -> None:
+    runtime, _, output = runtime_for(
+        "próximo comboio para o trabalho", transit=FakeTransit(no_direct=True)
+    )
+
+    assert runtime._handle_command(iter(FakeAudio(2).frames())) is True
+    assert output.messages == [
+        "Não há nenhum RER A direto disponível para o trabalho a esta hora."
+    ]
 
 
 def test_speaking_and_cooldown_reject_self_echo_wakeword() -> None:

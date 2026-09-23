@@ -14,7 +14,11 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from dn_home.core.config import TransitConfig, TransitStopConfig
-from dn_home.skills.transit.base import TransitUnavailable, TransitProvider
+from dn_home.skills.transit.base import (
+    TransitNoDirectService,
+    TransitUnavailable,
+    TransitProvider,
+)
 from dn_home.skills.transit.models import TransitResult
 
 
@@ -91,13 +95,30 @@ class IDFMNavitiaProvider(TransitProvider):
             {"Accept": "application/json", "apikey": self._token()},
             self.config.timeout,
         )
+        if not isinstance(payload, dict):
+            raise TransitUnavailable("IDFM returned an invalid response")
+
+        error = payload.get("error") or {}
+        detail = error.get("message") if isinstance(error, dict) else None
+        if detail:
+            raise TransitUnavailable(str(detail))
+
+        journeys = payload.get("journeys")
+        if not isinstance(journeys, list):
+            raise TransitUnavailable("IDFM returned an invalid journeys response")
+
         departures: list[tuple[datetime, str, bool, str]] = []
-        for journey in payload.get("journeys", []):
-            if not isinstance(journey, dict) or journey.get("nb_transfers") != 0:
+        for journey in journeys:
+            if not isinstance(journey, dict):
+                raise TransitUnavailable("IDFM returned an invalid journey")
+            if journey.get("nb_transfers") != 0:
                 continue
+            sections = journey.get("sections")
+            if not isinstance(sections, list):
+                raise TransitUnavailable("IDFM returned invalid journey sections")
             public_sections = [
                 section
-                for section in journey.get("sections", [])
+                for section in sections
                 if isinstance(section, dict) and section.get("type") == "public_transport"
             ]
             if len(public_sections) != 1:
@@ -124,11 +145,7 @@ class IDFMNavitiaProvider(TransitProvider):
             )
 
         if not departures:
-            error = payload.get("error") or {}
-            detail = error.get("message") if isinstance(error, dict) else None
-            raise TransitUnavailable(
-                detail or f"No direct {self.config.line_name} journey was returned"
-            )
+            raise TransitNoDirectService(alias, self.config.line_name)
 
         now = self._now().astimezone(PARIS_TZ)
         departures.sort(key=lambda item: item[0])
@@ -141,9 +158,7 @@ class IDFMNavitiaProvider(TransitProvider):
             if len(unique) >= self.config.result_count:
                 break
         if not unique:
-            raise TransitUnavailable(
-                f"IDFM returned no future direct {self.config.line_name} departure"
-            )
+            raise TransitNoDirectService(alias, self.config.line_name)
 
         minutes = [max(0, math.ceil((item[0] - now).total_seconds() / 60)) for item in unique]
         first = unique[0]

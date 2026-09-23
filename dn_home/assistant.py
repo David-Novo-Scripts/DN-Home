@@ -10,7 +10,7 @@ from typing import Iterator
 from dn_home.core.config import AssistantConfig
 from dn_home.core.events import Event, EventBus
 from dn_home.intents.transit import parse_transit_intent
-from dn_home.skills.transit.base import TransitError
+from dn_home.skills.transit.base import TransitError, TransitNoDirectService
 from dn_home.skills.transit.service import TransitSkill
 from dn_home.voice.input.base import AudioFrame, AudioInput
 from dn_home.voice.input.capture import UtteranceCapture
@@ -88,6 +88,10 @@ class AssistantRuntime:
     def _publish(self, name: str, **data: object) -> None:
         self.events.publish(Event(name, dict(data)))
 
+    def _enter_state(self, state: VoiceState) -> None:
+        self.machine.enter(state)
+        self._publish("voice.state_changed", state=state.value)
+
     def _wait_for_wake(
         self, frames: Iterator[AudioFrame], deadline: float | None
     ) -> bool:
@@ -118,45 +122,138 @@ class AssistantRuntime:
                 return
 
     def _handle_command(self, frames: Iterator[AudioFrame]) -> bool:
-        self.machine.enter(VoiceState.LISTENING)
+        self._enter_state(VoiceState.LISTENING)
         self._publish("voice.listening_started")
+        capture_started_at = time.monotonic()
         utterance = self.utterance_capture.capture(frames)
+        capture_completed_at = time.monotonic()
+        capture_ms = round((capture_completed_at - capture_started_at) * 1000)
         if not utterance.speech_detected:
-            self._publish("voice.listen_timeout", reason=utterance.reason)
+            self._publish(
+                "voice.listen_timeout", reason=utterance.reason, capture_ms=capture_ms
+            )
             self.machine.begin_cooldown()
+            self._publish("voice.state_changed", state=VoiceState.COOLDOWN.value)
             self._drain_cooldown(frames)
             return False
 
-        self.machine.enter(VoiceState.PROCESSING)
-        self._publish("voice.utterance_captured", duration_ms=utterance.duration_ms)
+        self._enter_state(VoiceState.PROCESSING)
+        end_silence_ms = 0
+        capture_config = getattr(self.utterance_capture, "config", None)
+        if utterance.reason == "end_silence" and capture_config is not None:
+            configured_silence = int(capture_config.end_silence_ms)
+            end_silence_ms = (
+                (configured_silence + UtteranceCapture.VAD_FRAME_MS - 1)
+                // UtteranceCapture.VAD_FRAME_MS
+                * UtteranceCapture.VAD_FRAME_MS
+            )
+        estimated_speech_end_at = capture_completed_at - end_silence_ms / 1000
+        self._publish(
+            "voice.utterance_captured",
+            duration_ms=utterance.duration_ms,
+            capture_ms=capture_ms,
+            reason=utterance.reason,
+            end_silence_ms=end_silence_ms,
+        )
+        stt_started_at = time.monotonic()
         transcript = self.stt.transcribe(utterance.pcm, 16_000)
+        transcript_ready_at = time.monotonic()
+        stt_ms = round((transcript_ready_at - stt_started_at) * 1000)
+        end_speech_to_transcript_ms = round(
+            (transcript_ready_at - estimated_speech_end_at) * 1000
+        )
         if not transcript.text.strip():
-            self._publish("voice.stt_empty")
+            self._publish(
+                "voice.stt_empty",
+                stt_ms=stt_ms,
+                end_speech_to_transcript_ms=end_speech_to_transcript_ms,
+            )
             self.machine.begin_cooldown()
+            self._publish("voice.state_changed", state=VoiceState.COOLDOWN.value)
             self._drain_cooldown(frames)
             return False
-        event_data: dict[str, object] = {"language": transcript.language}
+        event_data: dict[str, object] = {
+            "language": transcript.language,
+            "stt_ms": stt_ms,
+            "end_speech_to_transcript_ms": end_speech_to_transcript_ms,
+        }
         if self.config.log_transcripts:
             event_data["text"] = transcript.text
         self._publish("voice.transcribed", **event_data)
 
+        intent_started_at = time.monotonic()
         intent = parse_transit_intent(transcript.text)
+        intent_ms = round((time.monotonic() - intent_started_at) * 1000, 3)
         if intent is None:
-            self._publish("intent.unknown")
+            self._publish("intent.unknown", parse_ms=intent_ms)
             response = "Não reconheci esse comando."
         else:
-            self._publish("intent.transit_next", destination=intent.destination)
+            self._publish(
+                "intent.transit_next",
+                intent="transit.next",
+                destination=intent.destination,
+                parse_ms=intent_ms,
+            )
+            transit_started_at = time.monotonic()
             try:
-                _result, response = self.transit.next(intent.destination)
+                result, response = self.transit.next(intent.destination)
+                transit_ms = round((time.monotonic() - transit_started_at) * 1000)
+                self._publish(
+                    "transit.result",
+                    destination=result.destination,
+                    destination_name=result.destination_name,
+                    line=result.line,
+                    departure_time=result.departure_time.isoformat(),
+                    minutes=result.minutes,
+                    following_minutes=list(result.following_minutes),
+                    direction=result.direction,
+                    realtime=result.realtime,
+                    status=result.status,
+                    provider_ms=transit_ms,
+                )
+            except TransitNoDirectService as error:
+                transit_ms = round((time.monotonic() - transit_started_at) * 1000)
+                self._publish(
+                    "transit.no_direct_service",
+                    destination=error.destination,
+                    line=error.line,
+                    provider_ms=transit_ms,
+                )
+                destination_text = (
+                    "o trabalho" if error.destination == "work" else "Paris"
+                )
+                response = (
+                    f"Não há nenhum {error.line} direto disponível para "
+                    f"{destination_text} a esta hora."
+                )
             except TransitError:
-                self._publish("transit.unavailable", destination=intent.destination)
+                transit_ms = round((time.monotonic() - transit_started_at) * 1000)
+                self._publish(
+                    "transit.unavailable",
+                    destination=intent.destination,
+                    provider_ms=transit_ms,
+                )
                 response = "Não foi possível obter horários de transporte agora."
 
-        self.machine.enter(VoiceState.SPEAKING)
+        response_ready_at = time.monotonic()
+        self._publish(
+            "voice.response_ready",
+            text=response,
+            end_speech_to_response_ready_ms=round(
+                (response_ready_at - estimated_speech_end_at) * 1000
+            ),
+        )
+        self._enter_state(VoiceState.SPEAKING)
         self._publish("voice.response_started", output="console")
+        output_started_at = time.monotonic()
         self.output.speak(response)
-        self._publish("voice.response_finished", output="console")
+        self._publish(
+            "voice.response_finished",
+            output="console",
+            output_ms=round((time.monotonic() - output_started_at) * 1000),
+        )
         self.machine.begin_cooldown()
+        self._publish("voice.state_changed", state=VoiceState.COOLDOWN.value)
         self._drain_cooldown(frames)
         return True
 
@@ -171,7 +268,7 @@ class AssistantRuntime:
         self._publish("assistant.started", output="console")
         try:
             while True:
-                self.machine.enter(VoiceState.WAIT_WAKE)
+                self._enter_state(VoiceState.WAIT_WAKE)
                 self._publish("voice.wait_wake")
                 if not self._wait_for_wake(frames, deadline):
                     return completed

@@ -11,7 +11,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import wave
 from pathlib import Path
 from typing import BinaryIO
@@ -24,8 +23,17 @@ from dn_home.voice.input.base import AudioFrame, AudioInput, AudioInputError
 class MicrophoneTestResult:
     duration_seconds: float
     frames: int
+    samples: int
     peak: int
     rms: int
+    full_scale_samples: int
+    clipping_percent: float
+    max_full_scale_run: int
+    initial_window_rms: int
+    final_window_rms: int
+    silence_threshold_rms: int
+    leading_silence_ms: int
+    trailing_silence_ms: int
     temporary_file_removed: bool
 
 
@@ -170,7 +178,6 @@ def test_microphone(config: AudioInputConfig, seconds: float) -> MicrophoneTestR
     samples = array("h")
     frame_count = 0
     temporary_path: Path | None = None
-    started = time.monotonic()
     try:
         with tempfile.NamedTemporaryFile(
             prefix="dn-home-mic-", suffix=".wav", delete=False
@@ -190,10 +197,67 @@ def test_microphone(config: AudioInputConfig, seconds: float) -> MicrophoneTestR
                 frame_count += 1
                 if frame_count >= target_frames:
                     break
-        elapsed = time.monotonic() - started
         peak = max((abs(value) for value in samples), default=0)
-        rms = int(math.sqrt(sum(value * value for value in samples) / len(samples))) if samples else 0
-        return MicrophoneTestResult(elapsed, frame_count, peak, rms, True)
+        square_sum = sum(value * value for value in samples)
+        rms = int(math.sqrt(square_sum / len(samples))) if samples else 0
+        full_scale = [value in (-32_768, 32_767) for value in samples]
+        full_scale_samples = sum(full_scale)
+        max_full_scale_run = 0
+        current_run = 0
+        for clipped in full_scale:
+            current_run = current_run + 1 if clipped else 0
+            max_full_scale_run = max(max_full_scale_run, current_run)
+
+        samples_per_second = config.sample_rate * config.channels
+        analysis_window = min(len(samples) // 4, samples_per_second)
+
+        def window_rms(values: array) -> int:
+            if not values:
+                return 0
+            return int(math.sqrt(sum(value * value for value in values) / len(values)))
+
+        initial_window_rms = window_rms(samples[:analysis_window])
+        final_window_rms = window_rms(samples[-analysis_window:])
+        silence_threshold_rms = max(
+            150, int(min(initial_window_rms, final_window_rms) * 2.5)
+        )
+        energy_frame_samples = max(1, samples_per_second // 50)
+        frame_rms_values = [
+            window_rms(samples[offset : offset + energy_frame_samples])
+            for offset in range(0, len(samples), energy_frame_samples)
+        ]
+
+        def silence_frames_before_speech(values: list[int]) -> int:
+            for index in range(max(0, len(values) - 2)):
+                if all(
+                    value > silence_threshold_rms
+                    for value in values[index : index + 3]
+                ):
+                    return index
+            return len(values)
+
+        leading_frames = silence_frames_before_speech(frame_rms_values)
+        trailing_frames = silence_frames_before_speech(list(reversed(frame_rms_values)))
+        audio_duration = len(samples) / samples_per_second if samples_per_second else 0
+        clipping_percent = (
+            full_scale_samples / len(samples) * 100 if samples else 0.0
+        )
+        return MicrophoneTestResult(
+            duration_seconds=audio_duration,
+            frames=frame_count,
+            samples=len(samples),
+            peak=peak,
+            rms=rms,
+            full_scale_samples=full_scale_samples,
+            clipping_percent=clipping_percent,
+            max_full_scale_run=max_full_scale_run,
+            initial_window_rms=initial_window_rms,
+            final_window_rms=final_window_rms,
+            silence_threshold_rms=silence_threshold_rms,
+            leading_silence_ms=leading_frames * 20,
+            trailing_silence_ms=trailing_frames * 20,
+            temporary_file_removed=True,
+        )
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)

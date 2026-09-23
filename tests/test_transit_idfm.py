@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dn_home.core.config import TransitConfig, TransitStopConfig
-from dn_home.skills.transit.base import TransitUnavailable
+from dn_home.skills.transit.base import TransitNoDirectService, TransitUnavailable
 from dn_home.skills.transit.idfm import IDFMNavitiaProvider
 from dn_home.skills.transit.service import format_transit_response
 
@@ -143,7 +143,7 @@ def test_filters_journey_that_does_not_reach_destination(
         {"journeys": [journey("20260921T080400", "IDFM:monomodalStopPlace:99999")]},
     )
 
-    with pytest.raises(TransitUnavailable, match="No direct RER A"):
+    with pytest.raises(TransitNoDirectService, match="No direct RER A"):
         client.next("work")
 
 
@@ -166,8 +166,19 @@ def test_filters_transfers_and_other_lines(monkeypatch: pytest.MonkeyPatch) -> N
         },
     )
 
-    with pytest.raises(TransitUnavailable, match="No direct RER A"):
+    with pytest.raises(TransitNoDirectService, match="No direct RER A"):
         client.next("work")
+
+
+def test_invalid_journeys_payload_is_a_technical_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = provider(monkeypatch, {"journeys": "invalid"})
+
+    with pytest.raises(TransitUnavailable, match="invalid journeys response") as error:
+        client.next("work")
+
+    assert not isinstance(error.value, TransitNoDirectService)
 
 
 def test_absence_of_realtime_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:

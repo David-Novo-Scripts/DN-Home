@@ -6,6 +6,7 @@ import argparse
 from array import array
 import asyncio
 from dataclasses import replace
+import json
 import logging
 from pathlib import Path
 import resource
@@ -21,6 +22,7 @@ from dn_home.core.config import (
     validate_voice_rate,
 )
 from dn_home.assistant import AssistantRuntime, ConsoleResponseOutput
+from dn_home.core.events import Event, EventBus
 from dn_home.core.logging import configure_logging
 from dn_home.devices.speakers.cast import CastSpeaker
 from dn_home.doctor import run_doctor
@@ -34,6 +36,7 @@ from dn_home.voice.input.alsa import AlsaArecordSource
 from dn_home.voice.input.base import AudioInputError
 from dn_home.voice.wakeword.base import WakeWordError
 from dn_home.voice.wakeword.openwakeword import OpenWakeWordEngine
+from dn_home.voice.wakeword.calibration import WakeAttempt, calibrate_wakeword
 from dn_home.voice.stt.base import STTError
 from dn_home.voice.stt.whisper_cpp import WhisperCppEngine
 from dn_home.voice.input.capture import UtteranceCapture
@@ -120,6 +123,9 @@ def _parser() -> argparse.ArgumentParser:
     mic_commands.add_parser("list", help="list ALSA capture devices and PCMs")
     mic_test = mic_commands.add_parser("test", help="capture and discard a diagnostic WAV")
     mic_test.add_argument("--seconds", type=float, default=5, help="capture duration (default: 5)")
+    mic_test.add_argument(
+        "--countdown", type=int, default=3, help="seconds before capture begins (default: 3)"
+    )
 
     wakeword = commands.add_parser("wakeword", help="benchmark the local wake-word engine")
     wakeword_commands = wakeword.add_subparsers(dest="wakeword_command", required=True)
@@ -146,6 +152,13 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="diagnostic only: report raw classifier scores without Silero gating",
     )
+    wakeword_calibrate = wakeword_commands.add_parser(
+        "calibrate", help="score a fixed number of deliberate wake-word attempts"
+    )
+    wakeword_calibrate.add_argument("--model", required=True, type=Path)
+    wakeword_calibrate.add_argument("--attempts", type=int, default=10)
+    wakeword_calibrate.add_argument("--timeout", type=float, default=120)
+    wakeword_calibrate.add_argument("--countdown", type=int, default=5)
 
     stt = commands.add_parser("stt", help="benchmark local speech recognition")
     stt_commands = stt.add_subparsers(dest="stt_command", required=True)
@@ -281,15 +294,45 @@ def _mic(args: argparse.Namespace, config) -> int:
         print(f"\nConfigured PCM: {config.audio_input.device}")
         return 0
     if args.mic_command == "test":
+        if not 0 <= args.countdown <= 10:
+            raise ConfigError("--countdown must be between 0 and 10")
+        if args.countdown:
+            print(f"capture_starts_in_seconds={args.countdown}", flush=True)
+            time.sleep(args.countdown)
+        print("capture_started=true", flush=True)
         result = test_microphone(config.audio_input, args.seconds)
+        clipping_status = (
+            "significant"
+            if result.clipping_percent >= 0.1
+            else "isolated"
+            if result.full_scale_samples
+            else "none"
+        )
         print(
             "microphone_test=ok device={device} duration_seconds={duration:.3f} "
-            "frames={frames} peak={peak} rms={rms} temporary_file_removed={removed}".format(
+            "frames={frames} samples={samples} peak={peak} rms={rms} "
+            "full_scale_samples={full_scale} clipping_percent={clipping:.6f} "
+            "max_full_scale_run={max_run} clipping_status={clipping_status} "
+            "initial_window_rms={initial_rms} final_window_rms={final_rms} "
+            "silence_threshold_rms={silence_threshold} "
+            "leading_silence_ms={leading_silence} "
+            "trailing_silence_ms={trailing_silence} "
+            "temporary_file_removed={removed}".format(
                 device=config.audio_input.device,
                 duration=result.duration_seconds,
                 frames=result.frames,
+                samples=result.samples,
                 peak=result.peak,
                 rms=result.rms,
+                full_scale=result.full_scale_samples,
+                clipping=result.clipping_percent,
+                max_run=result.max_full_scale_run,
+                clipping_status=clipping_status,
+                initial_rms=result.initial_window_rms,
+                final_rms=result.final_window_rms,
+                silence_threshold=result.silence_threshold_rms,
+                leading_silence=result.leading_silence_ms,
+                trailing_silence=result.trailing_silence_ms,
                 removed=str(result.temporary_file_removed).lower(),
             )
         )
@@ -417,6 +460,64 @@ def _wakeword_benchmark(args: argparse.Namespace, config) -> int:
     return 0
 
 
+def _wakeword_calibrate(args: argparse.Namespace, config) -> int:
+    if not 1 <= args.attempts <= 50:
+        raise ConfigError("--attempts must be between 1 and 50")
+    if not 10 <= args.timeout <= 600:
+        raise ConfigError("--timeout must be between 10 and 600 seconds")
+    if not 0 <= args.countdown <= 10:
+        raise ConfigError("--countdown must be between 0 and 10")
+    if config.audio_input.sample_rate != 16_000 or config.audio_input.channels != 1:
+        raise ConfigError("wake-word calibration requires audio_input at 16000 Hz mono")
+
+    model_path = args.model.expanduser().resolve()
+    load_started = time.monotonic()
+    engine = OpenWakeWordEngine(replace(config.wake_word, model_path=model_path))
+    vad = SileroVoiceActivityDetector(model_path.parent / "silero_vad.onnx")
+    load_ms = round((time.monotonic() - load_started) * 1000)
+    if args.countdown:
+        print(f"capture_starts_in_seconds={args.countdown}", flush=True)
+        time.sleep(args.countdown)
+    print(
+        f"calibration_started=true model={engine.name} attempts={args.attempts} "
+        f"threshold={config.wake_word.threshold:.3f}",
+        flush=True,
+    )
+
+    def report(attempt: WakeAttempt) -> None:
+        latency = (
+            str(attempt.detection_latency_ms)
+            if attempt.detection_latency_ms is not None
+            else "n/a"
+        )
+        print(
+            f"attempt={attempt.number} score={attempt.score:.4f} "
+            f"detected={str(attempt.detected).lower()} "
+            f"detection_latency_ms={latency} "
+            f"speech_duration_ms={attempt.speech_duration_ms}",
+            flush=True,
+        )
+
+    result = calibrate_wakeword(
+        audio=AlsaArecordSource(config.audio_input),
+        engine=engine,
+        vad=vad,
+        threshold=config.vad.threshold,
+        attempt_count=args.attempts,
+        timeout_seconds=args.timeout,
+        on_attempt=report,
+    )
+    detected = sum(attempt.detected for attempt in result.attempts)
+    print(
+        f"wakeword_calibration=complete model={engine.name} "
+        f"attempts_completed={len(result.attempts)} detections={detected} "
+        f"threshold={config.wake_word.threshold:.3f} load_ms={load_ms} "
+        f"wall_seconds={result.wall_seconds:.3f} cpu_percent={result.cpu_percent:.1f} "
+        f"peak_rss_mib={result.peak_rss_mib:.1f} audio_written_to_disk=false"
+    )
+    return 0 if len(result.attempts) == args.attempts else 1
+
+
 def _capture_fixed_pcm(config, seconds: float) -> bytes:
     if not 0.5 <= seconds <= 30:
         raise ConfigError("--seconds must be between 0.5 and 30")
@@ -482,6 +583,16 @@ def _assistant(args: argparse.Namespace, config) -> int:
         raise ConfigError("--max-wait-seconds must be positive")
     wakeword = OpenWakeWordEngine(config.wake_word)
     vad = SileroVoiceActivityDetector(config.wake_word.model_path.parent / "silero_vad.onnx")
+    events = EventBus()
+
+    def report_event(event: Event) -> None:
+        payload = {"event": event.name, **event.data}
+        print(
+            "assistant_event=" + json.dumps(payload, ensure_ascii=False, default=str),
+            flush=True,
+        )
+
+    events.subscribe("*", report_event)
     runtime = AssistantRuntime(
         audio=AlsaArecordSource(config.audio_input),
         wakeword=wakeword,
@@ -490,6 +601,7 @@ def _assistant(args: argparse.Namespace, config) -> int:
         transit=TransitSkill(IDFMNavitiaProvider(config.transit)),
         output=ConsoleResponseOutput(),
         config=config.assistant,
+        events=events,
     )
     print("assistant_mode=foreground output=console cast=false", flush=True)
     completed = runtime.run(
@@ -518,6 +630,8 @@ def main(argv: list[str] | None = None) -> int:
             return _mic(args, config)
         if args.command == "wakeword" and args.wakeword_command == "benchmark":
             return _wakeword_benchmark(args, config)
+        if args.command == "wakeword" and args.wakeword_command == "calibrate":
+            return _wakeword_calibrate(args, config)
         if args.command == "stt" and args.stt_command == "benchmark":
             return _stt_benchmark(args, config)
         if args.command == "assistant":
