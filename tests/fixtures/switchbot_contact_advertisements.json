@@ -1,0 +1,63 @@
+{
+  "device": {
+    "model": "WoContact",
+    "firmware": "2.0",
+    "ble_mac": "E3:98:BB:9A:FE:85",
+    "manufacturer_id": 2409,
+    "service_uuid": "0000fd3d-0000-1000-8000-00805f9b34fb"
+  },
+  "fixtures": [
+    {
+      "name": "normal_1",
+      "manufacturer_data_hex": "e398bb9afe85534c009e00d445",
+      "service_data_hex": "6420e401009d00d345",
+      "expected": {
+        "model": "d",
+        "battery": 100,
+        "contact_open": false,
+        "light": true,
+        "motion": false,
+        "button_count": 5
+      }
+    },
+    {
+      "name": "normal_2",
+      "manufacturer_data_hex": "e398bb9afe85534c00ba00f045",
+      "service_data_hex": "6420e40100ba00f045",
+      "expected": {
+        "model": "d",
+        "battery": 100,
+        "contact_open": false,
+        "light": true,
+        "motion": false,
+        "button_count": 5
+      }
+    },
+    {
+      "name": "normal_3",
+      "manufacturer_data_hex": "e398bb9afe85534c00c600fc45",
+      "service_data_hex": "6420e40100bf00f545",
+      "expected": {
+        "model": "d",
+        "battery": 100,
+        "contact_open": false,
+        "light": true,
+        "motion": false,
+        "button_count": 5
+      }
+    },
+    {
+      "name": "pair_mode",
+      "manufacturer_data_hex": "e398bb9afe8555cc0020018946",
+      "service_data_hex": "4460e401002b018946",
+      "expected": {
+        "model": "D",
+        "battery": 100,
+        "contact_open": false,
+        "light": true,
+        "motion": true,
+        "button_count": 6
+      }
+    }
+  ]
+}

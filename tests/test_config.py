@@ -65,7 +65,48 @@ def test_load_config_resolves_values(tmp_path: Path) -> None:
     assert config.transit.origin.stop_id == "IDFM:monomodalStopPlace:474082"
     assert config.transit.destinations["work"].stop_id == "IDFM:monomodalStopPlace:43152"
     assert config.transit.destinations["paris"].stop_id == "IDFM:monomodalStopPlace:473875"
+    assert config.sensors == {}
     assert config.logging.file == tmp_path / "logs" / "test.log"
+
+
+def test_loads_switchbot_contact_sensor_config(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        VALID_CONFIG
+        + """
+sensors:
+  entry_contact:
+    provider: switchbot_ble
+    mac: E3:98:BB:9A:FE:85
+    adapter: hci0
+    stale_after_seconds: 20
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    sensor = config.sensors["entry_contact"]
+    assert sensor.mac == "E3:98:BB:9A:FE:85"
+    assert sensor.adapter == "hci0"
+    assert sensor.stale_after_seconds == 20
+
+
+def test_rejects_invalid_switchbot_mac(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        VALID_CONFIG
+        + """
+sensors:
+  entry_contact:
+    provider: switchbot_ble
+    mac: not-a-mac
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="sensors.entry_contact.mac"):
+        load_config(path)
 
 
 def test_rejects_out_of_range_volume(tmp_path: Path) -> None:

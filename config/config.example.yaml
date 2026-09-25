@@ -69,6 +69,14 @@ assistant:
   # Transcripts can contain private speech and are not logged by default.
   log_transcripts: false
 
+sensors:
+  entry_contact:
+    provider: switchbot_ble
+    # Device identity belongs in local config; it is never hardcoded in Python.
+    mac: "AA:BB:CC:DD:EE:FF"
+    adapter: hci0
+    stale_after_seconds: 15
+
 transit:
   provider: idfm_navitia
   api_base: https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia

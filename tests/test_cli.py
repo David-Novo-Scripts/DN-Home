@@ -177,6 +177,17 @@ def test_voice_poc_parsers() -> None:
     assert assistant.once is True and assistant.max_wait_seconds == 30
 
 
+def test_switchbot_contact_monitor_parser() -> None:
+    args = cli._parser().parse_args(
+        ["switchbot", "contact", "monitor", "--seconds", "300"]
+    )
+
+    assert args.switchbot_command == "contact"
+    assert args.contact_command == "monitor"
+    assert args.sensor == "entry_contact"
+    assert args.seconds == 300
+
+
 def test_cast_volume_is_untouched_by_default() -> None:
     speaker = SimpleNamespace(manage_volume=False, volume=35)
 

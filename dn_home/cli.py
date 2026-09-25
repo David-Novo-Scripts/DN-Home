@@ -29,6 +29,12 @@ from dn_home.doctor import run_doctor
 from dn_home.skills.transit.base import TransitError
 from dn_home.skills.transit.idfm import IDFMNavitiaProvider
 from dn_home.skills.transit.service import TransitSkill
+from dn_home.sensors.switchbot import (
+    ContactSensorChange,
+    DoorState,
+    SwitchBotBLEProvider,
+    SwitchBotContactSensor,
+)
 from dn_home.voice.tts.base import TTSError
 from dn_home.voice.tts.edge import EdgeTTSEngine
 from dn_home.voice.input.alsa import list_alsa_devices, test_microphone
@@ -191,6 +197,30 @@ def _parser() -> argparse.ArgumentParser:
         "--max-wait-seconds",
         type=float,
         help="optional bounded PoC runtime; omitted means run until interrupted",
+    )
+
+    switchbot = commands.add_parser(
+        "switchbot", help="monitor local SwitchBot BLE sensors"
+    )
+    switchbot_commands = switchbot.add_subparsers(
+        dest="switchbot_command", required=True
+    )
+    contact = switchbot_commands.add_parser("contact", help="Contact Sensor tools")
+    contact_commands = contact.add_subparsers(
+        dest="contact_command", required=True
+    )
+    contact_monitor = contact_commands.add_parser(
+        "monitor", help="print deduplicated Contact Sensor changes"
+    )
+    contact_monitor.add_argument(
+        "--sensor",
+        default="entry_contact",
+        help="configured sensor name (default: entry_contact)",
+    )
+    contact_monitor.add_argument(
+        "--seconds",
+        type=float,
+        help="optional bounded monitoring time; omitted means run until interrupted",
     )
     return parser
 
@@ -612,6 +642,63 @@ def _assistant(args: argparse.Namespace, config) -> int:
     return 0
 
 
+def _display_sensor_value(value) -> str:
+    if isinstance(value, DoorState):
+        return value.value
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+async def _switchbot_contact_monitor(args: argparse.Namespace, config) -> int:
+    if args.seconds is not None and not 1 <= args.seconds <= 86_400:
+        raise ConfigError("--seconds must be between 1 and 86400")
+    try:
+        sensor_config = config.sensors[args.sensor]
+    except KeyError as error:
+        raise ConfigError(f"Unknown configured sensor: {args.sensor}") from error
+    if not sensor_config.mac:
+        raise ConfigError(f"Configure sensors.{args.sensor}.mac before monitoring")
+
+    events = EventBus()
+    sensor = SwitchBotContactSensor(
+        args.sensor,
+        sensor_config.mac,
+        stale_after_seconds=sensor_config.stale_after_seconds,
+        events=events,
+    )
+
+    def show_change(change: ContactSensorChange) -> None:
+        timestamp = change.state.last_seen.astimezone().strftime("%H:%M:%S")
+        if change.field == "seen" and change.current is True:
+            print(
+                f"[{timestamp}] connected-by-advertisement "
+                f"address={sensor.address} rssi={change.state.rssi} "
+                f"battery={change.state.battery}",
+                flush=True,
+            )
+            return
+        if change.field == "seen":
+            print(f"[{timestamp}] sensor-lost address={sensor.address}", flush=True)
+            return
+        print(
+            f"[{timestamp}] {change.field}: "
+            f"{_display_sensor_value(change.previous)} -> "
+            f"{_display_sensor_value(change.current)}",
+            flush=True,
+        )
+
+    print(
+        f"switchbot_monitor=started sensor={args.sensor} address={sensor.address} "
+        f"adapter={sensor_config.adapter} mode=active connect=false",
+        flush=True,
+    )
+    provider = SwitchBotBLEProvider(sensor, adapter=sensor_config.adapter)
+    await provider.monitor(on_change=show_change, duration_seconds=args.seconds)
+    print("switchbot_monitor=stopped", flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -636,6 +723,12 @@ def main(argv: list[str] | None = None) -> int:
             return _stt_benchmark(args, config)
         if args.command == "assistant":
             return _assistant(args, config)
+        if (
+            args.command == "switchbot"
+            and args.switchbot_command == "contact"
+            and args.contact_command == "monitor"
+        ):
+            return asyncio.run(_switchbot_contact_monitor(args, config))
         raise ConfigError(f"Unknown command: {args.command}")
     except (
         ConfigError,

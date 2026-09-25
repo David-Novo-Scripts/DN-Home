@@ -131,6 +131,8 @@ Atualmente tenho:
 - iPhone.
 - SwitchBot Contact Sensor instalado e disponível para PoC BLE local.
 - Nanoleaf Essentials A19, família NL45, HomeKit/Thread non-Matter.
+- Shelly física com AP local acessível em `192.168.33.1`, modelo e geração
+  ainda por identificar através da API local read-only.
 - Uma lâmpada normal no quarto que futuramente poderá ser substituída por lâmpada RGB inteligente.
 - Um downlight/spot LED encastrado no teto, preso por molas, que futuramente poderá ser substituído por um downlight RGB inteligente compatível.
 - Futuramente poderá existir um leitor NFC PN532 ou semelhante.
@@ -240,15 +242,25 @@ door.opened
 door.closed
 door.motion_detected
 
-O diagnóstico deve começar por discovery e decoding passivos segundo a BLE
-Open API oficial da SwitchBot. Não fazer reset, pairing ou writes BLE sem
-aprovação explícita. O endereço não deve ser hardcoded antes de o dispositivo
-ser identificado de forma inequívoca.
+O sensor foi identificado como `WoContact`, firmware v2.0. O advertising normal
+foi comprovado no `hci0` do Raspberry Pi 5, independentemente do iPhone, com
+manufacturer `0x0969`, service data `FD3D` e device type `d`/`0x64`. O Pair Mode
+usa `D`/`0x44` e deve ser apenas diagnóstico. A automação principal não depende
+de GATT, password, pairing, bonding, cloud ou SwitchBot Hub.
 
-Os primeiros scans passivos não identificaram ainda advertisements compatíveis
-com Contact Sensor (`FD3D`, legacy `000D` ou device type `0x64`/`d`). Isto é um
-estado de discovery pendente, não prova de ausência ou incompatibilidade do
-sensor.
+A integração local deve usar active scan Bleak, filtrar o endereço configurado
+e decodificar deterministicamente o Service Data segundo a BLE Open API oficial
+da SwitchBot. O parser deve expor porta (`closed`, `open`, `timeout`), PIR,
+luminosidade, bateria, tempos desde PIR/Hall e contadores de entrada, saída e
+botão. O MAC e o adapter BlueZ pertencem à configuração local e nunca devem ser
+hardcoded no código.
+
+Advertisements repetidos sem alteração atualizam `last_seen` e RSSI sem gerar
+eventos duplicados. Transições reais devem produzir `door.opened`,
+`door.closed`, `door.left_open`, `door.motion_detected`, `door.light_changed`,
+`door.sensor_seen` e `door.sensor_lost`. O limiar de stale/lost deve ser
+configurável para acomodar a cadência observada sem mascarar indisponibilidade
+real. Raw HCI fica reservado a diagnóstico; não é o backend normal do projeto.
 
 ========================
 7. ESTADO CENTRAL DA CASA
@@ -353,6 +365,11 @@ Eventos futuros:
 
 door.opened
 door.closed
+door.left_open
+door.motion_detected
+door.light_changed
+door.sensor_seen
+door.sensor_lost
 motion.detected
 resident.arrived
 resident.departed
@@ -452,6 +469,12 @@ emparelhamento existente. Não assumir suporte à Nanoleaf HTTP OpenAPI, nem
 fazer reset, novo pairing ou alteração de estado sem validação e aprovação
 explícitas.
 
+A Shelly deverá ser integrada, depois de identificado o modelo e a geração,
+através da API local correspondente e de abstrações como `ShellyDevice`,
+`ShellySwitch` e `ShellyProvider`. Host, provider e switch/component ID devem
+ser configuração, nunca hardcoded. `status()` é read-only; `turn_on()` e
+`turn_off()` exigem autorização antes do primeiro teste físico.
+
 Quero abstrair fabricantes.
 
 Não quero que automações dependam diretamente de Tapo/Nanoleaf/etc.
@@ -473,6 +496,11 @@ Chegada durante o dia:
 
 Chegada à noite:
 → luz quente e fraca
+
+Uma futura automação de entrada pode combinar porta, PIR, luminosidade,
+presença BLE/iPhone/Amazfit, NFC e contexto temporal antes de atuar sobre
+Shelly e/ou Nanoleaf. Fechar a porta, isoladamente, nunca implica desligar a
+luz.
 
 Exemplo:
 23:30

@@ -128,6 +128,14 @@ class TransitConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SwitchBotContactConfig:
+    provider: str
+    mac: str | None
+    adapter: str
+    stale_after_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     resident_name: str
     voice: VoiceConfig
@@ -141,6 +149,7 @@ class AppConfig:
     stt: SttConfig
     assistant: AssistantConfig
     transit: TransitConfig
+    sensors: dict[str, SwitchBotContactConfig]
     source: Path
 
 
@@ -242,6 +251,7 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
     stt = _mapping(root.get("stt", {}), "stt")
     assistant = _mapping(root.get("assistant", {}), "assistant")
     transit = _mapping(root.get("transit", {}), "transit")
+    sensor_values = _mapping(root.get("sensors", {}), "sensors")
 
     speaker_volume = int(_number(speaker.get("volume", 35), "speaker.volume", 0, 100))
     speaker_port = int(_number(speaker.get("port", 8009), "speaker.port", 1, 65535))
@@ -272,6 +282,35 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
     }
     if not destinations:
         raise ConfigError("'transit.destinations' must contain at least one destination")
+
+    sensors: dict[str, SwitchBotContactConfig] = {}
+    mac_pattern = re.compile(r"^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+    for sensor_name, sensor_value in sensor_values.items():
+        raw_sensor = _mapping(sensor_value, f"sensors.{sensor_name}")
+        provider = _required_text(
+            raw_sensor.get("provider"), f"sensors.{sensor_name}.provider"
+        ).lower()
+        if provider != "switchbot_ble":
+            raise ConfigError(
+                f"Unsupported provider for sensors.{sensor_name}: {provider}"
+            )
+        mac = _optional_text(raw_sensor.get("mac"))
+        if mac is not None and mac_pattern.fullmatch(mac) is None:
+            raise ConfigError(f"'sensors.{sensor_name}.mac' must be a BLE MAC address")
+        sensors[str(sensor_name)] = SwitchBotContactConfig(
+            provider=provider,
+            mac=mac.upper() if mac else None,
+            adapter=_required_text(
+                raw_sensor.get("adapter", "hci0"),
+                f"sensors.{sensor_name}.adapter",
+            ),
+            stale_after_seconds=_number(
+                raw_sensor.get("stale_after_seconds", 15),
+                f"sensors.{sensor_name}.stale_after_seconds",
+                2,
+                3600,
+            ),
+        )
 
     return AppConfig(
         resident_name=str(house.get("resident_name", "David")).strip() or "David",
@@ -412,5 +451,6 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
                 _number(transit.get("result_count", 2), "transit.result_count", 1, 5)
             ),
         ),
+        sensors=sensors,
         source=source,
     )

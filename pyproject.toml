@@ -9,6 +9,7 @@ description = "Local-first home assistant for Raspberry Pi"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "bleak>=2,<4",
     "edge-tts>=7.2,<8",
     "PyChromecast>=14,<15",
     "python-dotenv>=1,<2",
